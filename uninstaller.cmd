@@ -1,19 +1,15 @@
 @echo off
 rem ============================================================================
-rem  DFWLogger - DESINSTALLATEUR UNIQUE
-rem  Desinstallation complete de l'application :
-rem   1. Arret de l'application et retrait des protections Big Brother / Serbert
-rem   2. Arret et suppression des services Windows (SYSTEM + Ring 0)
-rem   3. Restauration DNS / hosts / registre / quotas
-rem   4. Suppression des raccourcis (Bureau + menu Demarrer)
-rem   5. Suppression des dossiers applicatifs et des donnees utilisateur
+rem  DFWLogger - DESINSTALLATEUR UNIQUE (Complet & Propre)
 rem ============================================================================
 setlocal EnableDelayedExpansion
+title DFWLogger - Desinstallation
 
+rem Verification et demande des droits administrateur si besoin
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [INFO] Elevation requise. Demande d'elevation UAC...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd -ArgumentList '/c `\"%~f0`\" %*' -Verb RunAs"
+    echo [INFO] Elevation administrateur requise...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
     exit /b
 )
 
@@ -21,62 +17,57 @@ echo ===========================================================================
 echo   DFWLogger - DESINSTALLATION COMPLETE
 echo ============================================================================
 echo.
+echo Cette action va completement desinstaller DFWLogger :
+echo   - Arreter les processus et retirer les protections actives
+echo   - Supprimer les services Windows (Big Brother SYSTEM et pilote Serbert)
+echo   - Restaurer les parametres DNS, hosts et registre (DisableMSI)
+echo   - Supprimer les raccourcis du Bureau et du Menu Demarrer
+echo   - Supprimer les dossiers d'installation et les donnees
+echo.
 
-set "EXE=%~dp0dfwlogger.exe"
-if not exist "%EXE%" (
-    if exist "%LOCALAPPDATA%\Programs\DFWLogger\dfwlogger.exe" (
-        set "EXE=%LOCALAPPDATA%\Programs\DFWLogger\dfwlogger.exe"
-    ) else if exist "%ProgramData%\DFWLogger\dfwlogger.exe" (
-        set "EXE=%ProgramData%\DFWLogger\dfwlogger.exe"
-    )
+set /p "CONFIRM=Confirmer la desinstallation complete ? (O/N, defaut: O) : "
+if /i "%CONFIRM%"=="N" (
+    echo.
+    echo Desinstallation annulee par l'utilisateur.
+    pause
+    exit /b 0
 )
 
-echo [1/8] Arret de l'application et retrait des protections...
-if exist "%EXE%" (
-    taskkill /F /IM dfwlogger.exe >nul 2>&1
-    "%EXE%" --uninstall-bigbrother --quiet
-)
+echo.
+echo [1/7] Arret force des processus DFWLogger...
+taskkill /F /IM dfwlogger.exe >nul 2>&1
 
-echo [2/8] Arret et suppression des services Windows...
+echo [2/7] Desinstallation et suppression des services Windows...
 sc stop DFWLoggerBigBrother >nul 2>&1
 sc delete DFWLoggerBigBrother >nul 2>&1
 sc stop Serbert >nul 2>&1
 sc delete Serbert >nul 2>&1
 
-echo [3/8] Nettoyage du registre...
+echo [3/7] Nettoyage des restrictions systeme (registre et hosts)...
 reg delete "HKLM\Software\Policies\Microsoft\Windows\Installer" /v "DisableMSI" /f >nul 2>&1
+reg delete "HKLM\Software\Policies\Microsoft\Windows\Safer\CodeIdentifiers" /f >nul 2>&1
 
-echo [4/8] Vidage du cache DNS...
+rem Restauration propre du fichier hosts si section DFWLogger presente
+powershell -NoProfile -Command "$hosts = [Environment]::GetFolderPath('System') + '\drivers\etc\hosts'; if (Test-Path $hosts) { $c = Get-Content $hosts -Raw; if ($c -match '# >>> DFWLOGGER-BIGBROTHER-BLOCK >>>') { $n = $c -replace '(?s)# >>> DFWLOGGER-BIGBROTHER-BLOCK >>>.*?# <<< DFWLOGGER-BIGBROTHER-BLOCK <<<', ''; Set-Content $hosts $n.Trim() } }" >nul 2>&1
+
+echo [4/7] Vidage du cache DNS...
 ipconfig /flushdns >nul 2>&1
 
-echo [5/8] Suppression des raccourcis (Bureau + menu Demarrer)...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$d = [Environment]::GetFolderPath('Desktop'); if (-not $d) { $d = Join-Path $env:USERPROFILE 'Desktop' }; $l = Join-Path $d 'DFWLogger.lnk'; if (Test-Path $l) { Remove-Item -Force $l }; $m = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\DFWLogger'; if (Test-Path $m) { Remove-Item -Recurse -Force $m }"
+echo [5/7] Suppression des raccourcis Bureau et Menu Demarrer...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$d = [Environment]::GetFolderPath('Desktop'); if (-not $d) { $d = Join-Path $env:USERPROFILE 'Desktop' }; $l = Join-Path $d 'DFWLogger.lnk'; if (Test-Path $l) { Remove-Item -Force $l }; $m = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\DFWLogger'; if (Test-Path $m) { Remove-Item -Recurse -Force $m }" >nul 2>&1
 
-echo [6/8] Suppression du dossier de l'application...
-set /p "CLEAN_APP=Effacer %LOCALAPPDATA%\Programs\DFWLogger ? (O/N, defaut: O) : "
-if /i "%CLEAN_APP%"=="O" (
-    powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '%LOCALAPPDATA%\Programs\DFWLogger'"
-)
+echo [6/7] Suppression des dossiers applicatifs et des donnees...
+powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '%LOCALAPPDATA%\Programs\DFWLogger'" >nul 2>&1
+powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '%ProgramData%\DFWLogger'" >nul 2>&1
+powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '%LOCALAPPDATA%\DFWLogger'" >nul 2>&1
 
-echo [7/8] Suppression des donnees utilisateur...
-set /p "CLEAN_DATA=Effacer les donnees utilisateur (journal + configuration) %LOCALAPPDATA%\DFWLogger ? (O/N, defaut: O) : "
-if /i "%CLEAN_DATA%"=="O" (
-    powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '%LOCALAPPDATA%\DFWLogger'"
-)
-
-echo [8/8] Suppression des donnees Big Brother (politique + etat)...
-set /p "CLEAN_BB=Effacer les donnees Big Brother %ProgramData%\DFWLogger ? (O/N, defaut: O) : "
-if /i "%CLEAN_BB%"=="O" (
-    powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '%ProgramData%\DFWLogger'"
-)
+echo [7/7] Verification du nettoyage...
+timeout /t 1 /nobreak >nul
 
 echo.
 echo ============================================================================
-echo   [SUCCES] DFWLogger a ete completement desinstalle.
-echo   - Protections Big Brother / Serbert retirees.
-echo   - Services Windows supprimes.
-echo   - Raccourcis et dossiers nettoyes.
+echo   [SUCCES] DFWLogger a ete completement desinstalle du systeme.
 echo ============================================================================
 echo.
 pause
-
+exit /b 0

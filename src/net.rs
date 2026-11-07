@@ -61,7 +61,6 @@ async fn run(shared: Arc<Shared>, port: u16, dir: std::path::PathBuf) {
         st.dashboard_listening = true;
         st.dashboard_error = None;
     }
-    eprintln!("dashboard en écoute : https://{}:{port}", crate::win::primary_lan_ip());
 
     loop {
         let (stream, _peer) = match listener.accept().await {

@@ -10,6 +10,8 @@ rem     - Verrouille les permissions NTFS (Admins + SYSTEM : F, Users : RX)
 rem ============================================================================
 setlocal EnableDelayedExpansion
 
+if /i "%1"=="--elevated" goto :install_bb
+
 set "EXE=%~dp0dfwlogger.exe"
 set "README=%~dp0README.md"
 if not exist "%EXE%" (
@@ -50,7 +52,7 @@ rem Verification des droits administrateur
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo [INFO] Elevation requise. Demande d'elevation UAC...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd -ArgumentList '/c `\"%~f0`\" --elevated' -Verb RunAs"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -ArgumentList '--elevated' -Verb RunAs"
     goto :end
 )
 

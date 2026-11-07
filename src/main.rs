@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! DFWLogger — superviseur familial transparent.
 //!
 //! Principe : l'application est VISIBLE (fenêtre, gestionnaire des tâches).
@@ -35,12 +37,50 @@ fn data_dir() -> PathBuf {
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
+    // Si lancé en ligne de commande depuis un terminal (avec des arguments),
+    // on s'attache à la console parent pour que stdout/stderr s'affichent normalement.
+    #[cfg(windows)]
+    unsafe {
+        extern "system" {
+            fn AttachConsole(dwProcessId: u32) -> i32;
+        }
+        if args.len() > 1 && !args.iter().any(|a| a == "--service") {
+            let _ = AttachConsole(0xFFFFFFFF);
+        }
+    }
+
     // Mode service Windows : boucle Big Brother (SYSTEM). Pas de GUI ici.
     if args.iter().any(|a| a == "--service") {
         if let Err(e) = svc::run_dispatcher() {
             big_brother::log(&format!("dispatcher : {e}"));
         }
         return Ok(());
+    }
+
+    // Importation de politique avec élévation UAC (évite os error 5)
+    if let Some(pos) = args.iter().position(|a| a == "--import-policy") {
+        if let Some(path) = args.get(pos + 1).cloned() {
+            if !win::is_admin() {
+                if let Err(e) = win::relaunch_elevated_args(&["--import-policy", &path]) {
+                    eprintln!("Erreur élévation pour importation politique : {e}");
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+            if let Ok(data) = std::fs::read(&path) {
+                let p = big_brother::big_brother_program_dir();
+                let _ = std::fs::create_dir_all(&p);
+                let target = p.join("big_brother.json");
+                if let Err(e) = std::fs::write(&target, data) {
+                    eprintln!("Erreur écriture big_brother.json : {e}");
+                    std::process::exit(1);
+                }
+                big_brother::tick();
+                println!("Politique importée et appliquée avec succès.");
+                let _ = std::fs::remove_file(&path);
+            }
+            return Ok(());
+        }
     }
 
     let quiet = args.iter().any(|a| a == "--quiet" || a == "-q" || a == "--silent");

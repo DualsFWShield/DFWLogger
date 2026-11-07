@@ -117,6 +117,41 @@ impl DfwApp {
             app.after_unlock(true);
             app.info = Some("Session restaurée automatiquement.".to_string());
         }
+        // Personnalisation du thème sombre : moderne, contrasté et réactif
+        let mut visuals = egui::Visuals::dark();
+        visuals.override_text_color = Some(egui::Color32::from_rgb(0xF1, 0xF5, 0xF9));
+        visuals.window_fill = egui::Color32::from_rgb(0x0F, 0x11, 0x17);
+        visuals.panel_fill = egui::Color32::from_rgb(0x13, 0x16, 0x20);
+        visuals.faint_bg_color = egui::Color32::from_rgb(0x1A, 0x1E, 0x2A);
+        visuals.extreme_bg_color = egui::Color32::from_rgb(0x0B, 0x0D, 0x12);
+
+        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(0x16, 0x1A, 0x25);
+        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x24, 0x2B, 0x3D));
+        visuals.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
+
+        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(0x1C, 0x22, 0x32);
+        visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x2D, 0x37, 0x4E));
+        visuals.widgets.inactive.rounding = egui::Rounding::same(6.0);
+
+        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(0x27, 0x33, 0x4D);
+        visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x3B, 0x82, 0xF6));
+        visuals.widgets.hovered.rounding = egui::Rounding::same(6.0);
+
+        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(0x25, 0x63, 0xEB);
+        visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x60, 0xA5, 0xFA));
+        visuals.widgets.active.rounding = egui::Rounding::same(6.0);
+
+        visuals.selection.bg_fill = egui::Color32::from_rgb(0x1D, 0x4E, 0xD8);
+        visuals.selection.stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x93, 0xC5, 0xFD));
+
+        cc.egui_ctx.set_visuals(visuals);
+
+        let mut style = (*cc.egui_ctx.style()).clone();
+        style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+        style.spacing.button_padding = egui::vec2(12.0, 7.0);
+        style.spacing.window_margin = egui::Margin::same(14.0);
+        cc.egui_ctx.set_style(style);
+
         app
     }
 
@@ -788,16 +823,24 @@ le consentement des enfants."
             ui.label(egui::RichText::new(tier.description()).weak());
             ui.add_space(8.0);
 
-            // Présentation des 3 Modes sous forme de cartes d'élévation
-            egui::Grid::new("modes-grid").num_columns(3).spacing([12.0, 8.0]).show(ui, |ui| {
+            // Présentation dynamique et aérée des 3 Modes sous forme de cartes modernes
+            let avail = ui.available_width();
+            let card_w = ((avail - 32.0) / 3.0).max(250.0);
+
+            egui::Grid::new("modes-grid").num_columns(3).spacing([14.0, 10.0]).show(ui, |ui| {
                 // CARTE 1 : Mode Standard
-                ui.group(|ui| {
-                    ui.set_width(235.0);
+                let f1 = egui::Frame::none()
+                    .fill(egui::Color32::from_rgb(0x15, 0x1A, 0x24))
+                    .stroke(egui::Stroke::new(1.5_f32, if tier == crate::big_brother::PrivilegeTier::Standard { egui::Color32::from_rgb(0x10, 0xB9, 0x81) } else { egui::Color32::from_rgb(0x27, 0x2F, 0x42) }))
+                    .rounding(egui::Rounding::same(8.0))
+                    .inner_margin(egui::Margin::same(12.0));
+                f1.show(ui, |ui| {
+                    ui.set_width(card_w);
                     ui.strong("⚪ 1. Sans autorisation");
                     ui.label(egui::RichText::new("(Mode Standard)").small().weak());
                     ui.add_space(4.0);
                     if tier == crate::big_brother::PrivilegeTier::Standard {
-                        ui.colored_label(egui::Color32::from_rgb(0x6f, 0xd6, 0x9e), "● ACTIF PAR DÉFAUT");
+                        ui.colored_label(egui::Color32::from_rgb(0x10, 0xB9, 0x81), "● ACTIF PAR DÉFAUT");
                     } else {
                         ui.label(egui::RichText::new("○ Inactif").weak());
                     }
@@ -805,7 +848,10 @@ le consentement des enfants."
                     ui.label(egui::RichText::new("• Démarrage sans élévation\n• Surveillance locale transparente\n• Journal chiffré AES-256-GCM\n• Aucune altération système").small());
                     ui.add_space(8.0);
                     if tier == crate::big_brother::PrivilegeTier::Standard {
-                        if ui.button("🛡️ Passer en Accès Admin").clicked() {
+                        let btn = egui::Button::new("🛡️ Passer en Accès Admin")
+                            .fill(egui::Color32::from_rgb(0x1D, 0x4E, 0xD8))
+                            .rounding(egui::Rounding::same(6.0));
+                        if ui.add(btn).clicked() {
                             self.promote_to_admin();
                         }
                     } else {
@@ -816,17 +862,22 @@ le consentement des enfants."
                 });
 
                 // CARTE 2 : Mode Admin
-                ui.group(|ui| {
-                    ui.set_width(235.0);
+                let f2 = egui::Frame::none()
+                    .fill(egui::Color32::from_rgb(0x15, 0x1A, 0x24))
+                    .stroke(egui::Stroke::new(1.5_f32, if tier == crate::big_brother::PrivilegeTier::Admin { egui::Color32::from_rgb(0x3B, 0x82, 0xF6) } else { egui::Color32::from_rgb(0x27, 0x2F, 0x42) }))
+                    .rounding(egui::Rounding::same(8.0))
+                    .inner_margin(egui::Margin::same(12.0));
+                f2.show(ui, |ui| {
+                    ui.set_width(card_w);
                     ui.strong("🛡️ 2. Accès Admin");
                     ui.label(egui::RichText::new("(Big Brother SYSTEM)").small().weak());
                     ui.add_space(4.0);
                     match self.big_brother_status.as_deref() {
                         Some("RUNNING") => {
                             if tier == crate::big_brother::PrivilegeTier::Admin {
-                                ui.colored_label(egui::Color32::from_rgb(0x88, 0xAA, 0xFF), "● ACTIF (SYSTEM)");
+                                ui.colored_label(egui::Color32::from_rgb(0x3B, 0x82, 0xF6), "● ACTIF (SYSTEM)");
                             } else {
-                                ui.colored_label(egui::Color32::from_rgb(0x6f, 0xd6, 0x9e), "🟢 SERVICE ACTIF");
+                                ui.colored_label(egui::Color32::from_rgb(0x10, 0xB9, 0x81), "🟢 SERVICE PRÊT");
                             }
                         }
                         Some("STOPPED") => {
@@ -841,13 +892,19 @@ le consentement des enfants."
                     ui.add_space(8.0);
                     match tier {
                         crate::big_brother::PrivilegeTier::Standard => {
-                            if ui.button("🛡️ Activer le Mode Admin").clicked() {
+                            let btn = egui::Button::new("🛡️ Activer le Mode Admin")
+                                .fill(egui::Color32::from_rgb(0x1D, 0x4E, 0xD8))
+                                .rounding(egui::Rounding::same(6.0));
+                            if ui.add(btn).clicked() {
                                 self.promote_to_admin();
                             }
                         }
                         crate::big_brother::PrivilegeTier::Admin => {
                             ui.horizontal(|ui| {
-                                if ui.button("⚡ Passer en Noyau").clicked() {
+                                let btn_k = egui::Button::new("⚡ Passer en Noyau")
+                                    .fill(egui::Color32::from_rgb(0xD9, 0x77, 0x06))
+                                    .rounding(egui::Rounding::same(6.0));
+                                if ui.add(btn_k).clicked() {
                                     self.promote_to_kernel();
                                 }
                                 if ui.button("⏹ Désactiver").clicked() {
@@ -864,13 +921,18 @@ le consentement des enfants."
                 });
 
                 // CARTE 3 : Mode Noyau
-                ui.group(|ui| {
-                    ui.set_width(235.0);
+                let f3 = egui::Frame::none()
+                    .fill(egui::Color32::from_rgb(0x15, 0x1A, 0x24))
+                    .stroke(egui::Stroke::new(1.5_f32, if tier == crate::big_brother::PrivilegeTier::Kernel { egui::Color32::from_rgb(0xF5, 0x9E, 0x0B) } else { egui::Color32::from_rgb(0x27, 0x2F, 0x42) }))
+                    .rounding(egui::Rounding::same(8.0))
+                    .inner_margin(egui::Margin::same(12.0));
+                f3.show(ui, |ui| {
+                    ui.set_width(card_w);
                     ui.strong("⚡ 3. Accès Noyau");
                     ui.label(egui::RichText::new("(Serbert Ring 0 Driver)").small().weak());
                     ui.add_space(4.0);
                     if self.serbert_driver_running {
-                        ui.colored_label(egui::Color32::from_rgb(0xFF, 0xCC, 0x00), "● ACTIF (Ring 0)");
+                        ui.colored_label(egui::Color32::from_rgb(0xF5, 0x9E, 0x0B), "● ACTIF (Ring 0)");
                     } else {
                         ui.colored_label(egui::Color32::from_rgb(0xE5, 0xA0, 0x5C), "○ Non chargé");
                     }
@@ -882,7 +944,10 @@ le consentement des enfants."
                             self.demote_to_admin();
                         }
                     } else {
-                        if ui.button("⚡ Activer l'Accès Noyau").clicked() {
+                        let btn = egui::Button::new("⚡ Activer l'Accès Noyau")
+                            .fill(egui::Color32::from_rgb(0xD9, 0x77, 0x06))
+                            .rounding(egui::Rounding::same(6.0));
+                        if ui.add(btn).clicked() {
                             self.promote_to_kernel();
                         }
                     }
@@ -1243,37 +1308,104 @@ le consentement des enfants."
                 }
             });
 
-            ui.add_space(12.0);
+            ui.add_space(16.0);
 
-            // Bouton d'enregistrement
+            // Barre d'action d'enregistrement moderne
             ui.horizontal(|ui| {
-                if ui.add(egui::Button::new("💾 Enregistrer la politique (big_brother.json)").min_size(egui::vec2(240.0, 32.0))).clicked() {
-                    match self.big_brother_cfg.save() {
-                        Ok(()) => {
-                            self.info = Some("Politique C:\\ProgramData\\DFWLogger\\big_brother.json enregistrée avec succès.".into());
-                            self.err = None;
-                            crate::big_brother::tick();
-                        }
-                        Err(e) => {
-                            self.err = Some(format!(
-                                "Échec d'enregistrement ({e}). Relancez l'application en tant qu'administrateur si le dossier est protégé."
-                            ));
-                            self.info = None;
-                        }
-                    }
+                let save_btn = egui::Button::new(
+                    egui::RichText::new("💾 Enregistrer et Appliquer la Politique")
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                )
+                .min_size(egui::vec2(280.0, 38.0))
+                .fill(egui::Color32::from_rgb(0x10, 0xB9, 0x81))
+                .rounding(egui::Rounding::same(8.0));
+
+                if ui.add(save_btn).on_hover_text("Enregistre la configuration. En Mode Standard, demande automatiquement l'élévation UAC sans échec.").clicked() {
+                    self.save_big_brother_policy();
                 }
 
-                if ui.button("Relancer avec élévation (Admin)…").clicked() {
-                    if let Err(e) = crate::win::relaunch_elevated() {
-                        self.err = Some(e);
-                    } else {
-                        std::process::exit(0);
-                    }
+                let sync_btn = egui::Button::new(
+                    egui::RichText::new("🔄 Appliquer immédiatement (tick)")
+                        .strong(),
+                )
+                .min_size(egui::vec2(210.0, 38.0))
+                .rounding(egui::Rounding::same(8.0));
+
+                if ui.add(sync_btn).clicked() {
+                    crate::big_brother::tick();
+                    self.info = Some("Politique Big Brother réappliquée immédiatement.".into());
+                    self.err = None;
+                }
+
+                let reload_btn = egui::Button::new("📋 Recharger l'état")
+                    .min_size(egui::vec2(140.0, 38.0))
+                    .rounding(egui::Rounding::same(8.0));
+
+                if ui.add(reload_btn).clicked() {
+                    self.refresh_modes();
+                    self.info = Some("État rechargé depuis le système.".into());
                 }
             });
 
-            ui.add_space(10.0);
+            ui.add_space(14.0);
         });
+    }
+
+    pub fn save_big_brother_policy(&mut self) {
+        if self.big_brother_time_window_enabled {
+            let days = if self.big_brother_window_weekdays_only {
+                vec![1, 2, 3, 4, 5]
+            } else {
+                vec![0, 1, 2, 3, 4, 5, 6]
+            };
+            self.big_brother_cfg.allowed_windows = vec![crate::big_brother::TimeWindow {
+                days,
+                from: self.big_brother_window_from.clone(),
+                to: self.big_brother_window_to.clone(),
+            }];
+        } else {
+            self.big_brother_cfg.allowed_windows.clear();
+        }
+
+        match self.big_brother_cfg.save() {
+            Ok(()) => {
+                self.info = Some("Politique système enregistrée et appliquée avec succès.".into());
+                self.err = None;
+                crate::big_brother::tick();
+            }
+            Err(e) => {
+                // Si l'utilisateur n'a pas les droits en écriture sur ProgramData (os error 5),
+                // on écrit le fichier dans LocalAppData et on déclenche l'importation UAC
+                let dir = crate::data_dir();
+                let _ = std::fs::create_dir_all(&dir);
+                let pending_path = dir.join("big_brother_pending.json");
+                match serde_json::to_vec_pretty(&self.big_brother_cfg) {
+                    Ok(data) => {
+                        if let Err(write_err) = std::fs::write(&pending_path, data) {
+                            self.err = Some(format!("Échec de préparation du fichier : {write_err}"));
+                            self.info = None;
+                            return;
+                        }
+                        let path_str = pending_path.to_string_lossy().to_string();
+                        match crate::win::relaunch_elevated_args(&["--import-policy", &path_str]) {
+                            Ok(()) => {
+                                self.info = Some("Demande d'autorisation UAC envoyée. Cliquez sur 'Oui' pour valider l'enregistrement.".into());
+                                self.err = None;
+                            }
+                            Err(elev_err) => {
+                                self.err = Some(format!("Élévation requise pour modifier les règles ({e}). {elev_err}"));
+                                self.info = None;
+                            }
+                        }
+                    }
+                    Err(ser_err) => {
+                        self.err = Some(format!("Erreur de sérialisation : {ser_err}"));
+                        self.info = None;
+                    }
+                }
+            }
+        }
     }
 
     pub fn promote_to_admin(&mut self) {
@@ -1565,91 +1697,106 @@ impl eframe::App for DfwApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
 
-        // Refresh immédiat quand les collecteurs publient, sinon battement lent.
+        // Refresh réactif et fluide (snappy) pour les animations et interactions utilisateur
         if self.shared.dirty.swap(false, Ordering::Relaxed) {
             ctx.request_repaint();
         } else {
-            ctx.request_repaint_after(Duration::from_millis(900));
+            ctx.request_repaint_after(Duration::from_millis(120));
         }
 
-        egui::TopBottomPanel::top("topbar").show(ctx, |ui| {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.strong("DFWLogger");
-                ui.add_space(4.0);
-                let monitoring = self.shared.monitoring.load(Ordering::Relaxed);
-                let chip = if monitoring { "🟢 active" } else { "🔒 verrouillé" };
-                ui.label(chip);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.selectable_value(&mut self.tab, Tab::Aide, "Aide");
-                    ui.selectable_value(&mut self.tab, Tab::Acces, "Accès réseau");
-                    ui.selectable_value(&mut self.tab, Tab::BigBrother, "🛡️ 3 Modes & Protection");
-                    ui.selectable_value(&mut self.tab, Tab::Reglages, "Réglages");
-                    ui.selectable_value(&mut self.tab, Tab::Evenements, "Événements");
-                    ui.selectable_value(&mut self.tab, Tab::Statut, "Statut");
+        egui::TopBottomPanel::top("topbar")
+            .frame(egui::Frame::none()
+                .fill(egui::Color32::from_rgb(0x13, 0x16, 0x22))
+                .inner_margin(egui::Margin::symmetric(14.0, 8.0))
+                .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x22, 0x28, 0x38))))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading(egui::RichText::new("🛡️ DFWLogger").color(egui::Color32::from_rgb(0x5B, 0x9C, 0xFF)).strong());
+                    ui.add_space(8.0);
+                    let monitoring = self.shared.monitoring.load(Ordering::Relaxed);
+                    let (chip_txt, chip_col) = if monitoring {
+                        ("● SURVEILLANCE ACTIVE", egui::Color32::from_rgb(0x10, 0xB9, 0x81))
+                    } else {
+                        ("🔒 JOURNAL VERROUILLÉ", egui::Color32::from_rgb(0xEF, 0x44, 0x44))
+                    };
+                    ui.label(egui::RichText::new(chip_txt).color(chip_col).small().strong());
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let mut nav_item = |ui: &mut egui::Ui, tab: Tab, icon: &str, title: &str| {
+                            let active = self.tab == tab;
+                            let text = egui::RichText::new(format!("{icon} {title}"))
+                                .color(if active { egui::Color32::WHITE } else { egui::Color32::from_rgb(0x94, 0xA3, 0xB8) })
+                                .strong();
+                            let btn = egui::Button::new(text)
+                                .fill(if active { egui::Color32::from_rgb(0x25, 0x63, 0xEB) } else { egui::Color32::from_rgb(0x18, 0x1C, 0x28) })
+                                .stroke(egui::Stroke::new(1.0_f32, if active { egui::Color32::from_rgb(0x60, 0xA5, 0xFA) } else { egui::Color32::from_rgb(0x2A, 0x32, 0x46) }))
+                                .rounding(egui::Rounding::same(6.0));
+                            if ui.add(btn).clicked() {
+                                self.tab = tab;
+                            }
+                        };
+
+                        nav_item(ui, Tab::Aide, "❓", "Aide");
+                        nav_item(ui, Tab::Acces, "📱", "Accès LAN");
+                        nav_item(ui, Tab::Reglages, "⚙️", "Réglages");
+                        nav_item(ui, Tab::BigBrother, "🛡️", "Modes & Règles");
+                        nav_item(ui, Tab::Evenements, "📋", "Journal");
+                        nav_item(ui, Tab::Statut, "📊", "Aperçu");
+                    });
                 });
             });
-            ui.add_space(4.0);
-        });
 
         let current_tier = crate::big_brother::PrivilegeTier::current();
 
-        egui::TopBottomPanel::top("mode_bar").show(ctx, |ui| {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Niveau d'accès :").strong());
+        egui::TopBottomPanel::top("mode_bar")
+            .frame(egui::Frame::none()
+                .fill(egui::Color32::from_rgb(0x17, 0x1B, 0x26))
+                .inner_margin(egui::Margin::symmetric(14.0, 7.0))
+                .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x24, 0x2C, 0x3E))))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Niveau d'Accès :").color(egui::Color32::from_rgb(0x94, 0xA3, 0xB8)).strong());
+                    ui.add_space(4.0);
 
-                let is_t1 = current_tier == crate::big_brother::PrivilegeTier::Standard;
-                let t1_text = if is_t1 { "● 1. Sans autorisation" } else { "1. Sans autorisation" };
-                let mut t1 = egui::RichText::new(t1_text);
-                if is_t1 {
-                    t1 = t1.color(egui::Color32::from_rgb(0x6f, 0xd6, 0x9e)).strong();
-                }
-                ui.label(t1);
-                ui.label("➔");
+                    let (tier_name, tier_col, tier_desc) = match current_tier {
+                        crate::big_brother::PrivilegeTier::Standard => ("1. Sans Autorisation (Standard)", egui::Color32::from_rgb(0x10, 0xB9, 0x81), "Non-intrusif — Journal chiffré local"),
+                        crate::big_brother::PrivilegeTier::Admin => ("2. Administrateur (Big Brother SYSTEM)", egui::Color32::from_rgb(0x3B, 0x82, 0xF6), "Service Windows — Filtrage DNS, hosts & SRP"),
+                        crate::big_brother::PrivilegeTier::Kernel => ("3. Noyau Matériel (Serbert Ring 0)", egui::Color32::from_rgb(0xF5, 0x9E, 0x0B), "Interception PsSetCreateProcess... Ring 0"),
+                    };
 
-                let is_t2 = current_tier == crate::big_brother::PrivilegeTier::Admin;
-                let t2_text = if is_t2 { "● 2. Accès Admin" } else { "2. Accès Admin" };
-                let mut t2 = egui::RichText::new(t2_text);
-                if is_t2 {
-                    t2 = t2.color(egui::Color32::from_rgb(0x88, 0xAA, 0xFF)).strong();
-                }
-                ui.label(t2);
-                ui.label("➔");
+                    ui.label(egui::RichText::new(tier_name).color(tier_col).strong());
+                    ui.label(egui::RichText::new(format!("— {tier_desc}")).weak().small());
 
-                let is_t3 = current_tier == crate::big_brother::PrivilegeTier::Kernel;
-                let t3_text = if is_t3 { "● 3. Accès Noyau" } else { "3. Accès Noyau" };
-                let mut t3 = egui::RichText::new(t3_text);
-                if is_t3 {
-                    t3 = t3.color(egui::Color32::from_rgb(0xFF, 0xCC, 0x00)).strong();
-                }
-                ui.label(t3);
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    match current_tier {
-                        crate::big_brother::PrivilegeTier::Standard => {
-                            if ui.button("🛡️ Passer en Accès Admin").clicked() {
-                                self.promote_to_admin();
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        match current_tier {
+                            crate::big_brother::PrivilegeTier::Standard => {
+                                let btn = egui::Button::new(egui::RichText::new("🛡️ Élever en Accès Admin").color(egui::Color32::WHITE).strong())
+                                    .fill(egui::Color32::from_rgb(0x1D, 0x4E, 0xD8))
+                                    .rounding(egui::Rounding::same(6.0));
+                                if ui.add(btn).clicked() {
+                                    self.promote_to_admin();
+                                }
+                            }
+                            crate::big_brother::PrivilegeTier::Admin => {
+                                let btn_k = egui::Button::new(egui::RichText::new("⚡ Activer le Mode Noyau").color(egui::Color32::WHITE).strong())
+                                    .fill(egui::Color32::from_rgb(0xD9, 0x77, 0x06))
+                                    .rounding(egui::Rounding::same(6.0));
+                                if ui.add(btn_k).clicked() {
+                                    self.promote_to_kernel();
+                                }
+                                if ui.button("↩️ Revenir sans élévation").clicked() {
+                                    self.demote_to_standard();
+                                }
+                            }
+                            crate::big_brother::PrivilegeTier::Kernel => {
+                                if ui.button("↩️ Rétrograder en Accès Admin").clicked() {
+                                    self.demote_to_admin();
+                                }
                             }
                         }
-                        crate::big_brother::PrivilegeTier::Admin => {
-                            if ui.button("⚡ Passer en Accès Noyau").clicked() {
-                                self.promote_to_kernel();
-                            }
-                            if ui.button("↩️ Revenir sans autorisation").clicked() {
-                                self.demote_to_standard();
-                            }
-                        }
-                        crate::big_brother::PrivilegeTier::Kernel => {
-                            if ui.button("↩️ Revenir en Accès Admin").clicked() {
-                                self.demote_to_admin();
-                            }
-                        }
-                    }
+                    });
                 });
             });
-            ui.add_space(4.0);
-        });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let opened = self.shared.store.lock().unwrap().is_open();
