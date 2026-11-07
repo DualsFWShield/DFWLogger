@@ -6,44 +6,40 @@
 targets = [{ triple = "x86_64-pc-windows-msvc" }]
 
 [advisories]
-# Échec si une vulnérabilité RustSec connue touche le graphe de dépendances.
 yanked = "warn"
+unmaintained = "warn"
+notice = "warn"
 ignore = [
-    # RUSTSEC-2026-0257 : Vulnérabilité spécifique à Unix/src/unix.rs dans webbrowser.
-    # DFWLogger tourne uniquement sous Windows (ShellExecuteW), non affecté.
+    # RUSTSEC-2026-0257 : Spécifique à Unix (webbrowser/src/unix.rs) ; DFWLogger tourne uniquement sous Windows.
     "RUSTSEC-2026-0257",
+    # RUSTSEC-2026-0382 : Intermédiaires emSign dans webpki ; DFWLogger n'utilise rustls qu'en serveur LAN avec certificat auto-signé.
+    "RUSTSEC-2026-0382",
+    # RUSTSEC-2026-0192 : ttf-parser déprécié (dépendance transitive d'egui 0.27 / ab_glyph, aucun upgrade compatible).
+    "RUSTSEC-2026-0192",
 ]
 
 [licenses]
 allow = [
     "MIT",
     "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "0BSD",
-    "CC0-1.0",
     "Unlicense",
     "ISC",
     "Unicode-3.0",
     "Zlib",
-    "MPL-2.0",
     "CDLA-Permissive-2.0",
-    "OpenSSL",
     "BSL-1.0",
-    "OFL-1.1",
 ]
 confidence-threshold = 0.8
+unused-allowed-license = "allow"
 
 # Clarification pour epaint (police Ubuntu / Noto embarquée dans egui)
 [[licenses.clarify]]
 name = "epaint"
 expression = "MIT OR Apache-2.0"
 license-files = []
-
-[[licenses.exceptions]]
-name = "epaint"
-allow = ["LicenseRef-UFL-1.0", "OFL-1.1"]
 
 [sources]
 unknown-registry = "warn"
