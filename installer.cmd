@@ -24,6 +24,7 @@ echo ===========================================================================
 echo.
 
 rem --- 1. Installation de l'application (sans elevation) ---
+taskkill /F /IM dfwlogger.exe >nul 2>&1
 set "DEST=%LOCALAPPDATA%\Programs\DFWLogger"
 if not exist "%DEST%" mkdir "%DEST%"
 copy /y "%EXE%" "%DEST%\" >nul || (
@@ -33,8 +34,8 @@ copy /y "%EXE%" "%DEST%\" >nul || (
 )
 if exist "%README%" copy /y "%README%" "%DEST%\" >nul
 
-rem --- 2. Raccourcis (Bureau + menu Demarrer) via WScript.Shell ---
-powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $desktop = [Environment]::GetFolderPath('Desktop'); $lnk1 = $ws.CreateShortcut((Join-Path $desktop 'DFWLogger.lnk')); $lnk1.TargetPath = '%DEST%\dfwlogger.exe'; $lnk1.IconLocation = '%DEST%\dfwlogger.exe,0'; $lnk1.Description = 'Superviseur familial transparent'; $lnk1.Save(); $smenu = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\DFWLogger'; if (!(Test-Path $smenu)) { New-Item -ItemType Directory -Force $smenu | Out-Null }; $lnk2 = $ws.CreateShortcut((Join-Path $smenu 'DFWLogger.lnk')); $lnk2.TargetPath = '%DEST%\dfwlogger.exe'; $lnk2.IconLocation = '%DEST%\dfwlogger.exe,0'; $lnk2.Description = 'Superviseur familial transparent'; $lnk2.Save()"
+rem --- 2. Raccourcis (Bureau + menu Demarrer) ---
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $d = [Environment]::GetFolderPath('Desktop'); if (-not $d) { $d = Join-Path $env:USERPROFILE 'Desktop' }; $t = '%DEST%\dfwlogger.exe'; $s1 = $ws.CreateShortcut((Join-Path $d 'DFWLogger.lnk')); $s1.TargetPath = $t; $s1.IconLocation = ($t + ',0'); $s1.Description = 'Superviseur familial transparent'; $s1.Save(); $m = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\DFWLogger'; if (-not (Test-Path $m)) { [void](New-Item -ItemType Directory -Force -Path $m) }; $s2 = $ws.CreateShortcut((Join-Path $m 'DFWLogger.lnk')); $s2.TargetPath = $t; $s2.IconLocation = ($t + ',0'); $s2.Description = 'Superviseur familial transparent'; $s2.Save()"
 
 echo.
 echo [OK] Application installee dans %DEST%.
