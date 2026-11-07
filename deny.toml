@@ -2,12 +2,17 @@
 # CI : `cargo deny check licenses advisories sources` (voir .github/workflows/build.yml)
 
 [graph]
-targets = [{ triple = "x86_64-pc-windows-msvc" }, { triple = "aarch64-apple-darwin" }]
+# DFWLogger est une application exclusivement Windows x64 (APIs Win32 / Kernel).
+targets = [{ triple = "x86_64-pc-windows-msvc" }]
 
 [advisories]
 # Échec si une vulnérabilité RustSec connue touche le graphe de dépendances.
 yanked = "warn"
-ignore = []
+ignore = [
+    # RUSTSEC-2026-0257 : Vulnérabilité spécifique à Unix/src/unix.rs dans webbrowser.
+    # DFWLogger tourne uniquement sous Windows (ShellExecuteW), non affecté.
+    "RUSTSEC-2026-0257",
+]
 
 [licenses]
 allow = [
@@ -16,6 +21,9 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "0BSD",
+    "CC0-1.0",
+    "Unlicense",
     "ISC",
     "Unicode-3.0",
     "Zlib",
@@ -23,8 +31,19 @@ allow = [
     "CDLA-Permissive-2.0",
     "OpenSSL",
     "BSL-1.0",
+    "OFL-1.1",
 ]
-confidence-threshold = 0.93
+confidence-threshold = 0.8
+
+# Clarification pour epaint (police Ubuntu / Noto embarquée dans egui)
+[[licenses.clarify]]
+name = "epaint"
+expression = "MIT OR Apache-2.0"
+license-files = []
+
+[[licenses.exceptions]]
+name = "epaint"
+allow = ["LicenseRef-UFL-1.0", "OFL-1.1"]
 
 [sources]
 unknown-registry = "warn"

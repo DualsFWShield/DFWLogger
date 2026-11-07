@@ -49,13 +49,26 @@ VOID SerbertProcessNotifyRoutine(
 
     KeAcquireGuardedMutex(&g_Lock);
 
-    // Extraction du nom de fichier à partir du chemin complet
-    UNICODE_STRING imageName = *CreateInfo->ImageFileName;
-    PWCHAR pLastSlash = wcsrchr(imageName.Buffer, L'\\');
-    PWCHAR pFileName = (pLastSlash != NULL) ? (pLastSlash + 1) : imageName.Buffer;
-
+    // Extraction sécurisée du nom de fichier (sans assumer de terminateur nul dans UNICODE_STRING)
     UNICODE_STRING shortName;
-    RtlInitUnicodeString(&shortName, pFileName);
+    USHORT numChars = CreateInfo->ImageFileName->Length / sizeof(WCHAR);
+    PWCHAR buf = CreateInfo->ImageFileName->Buffer;
+    LONG lastSlash = -1;
+
+    for (LONG idx = (LONG)numChars - 1; idx >= 0; idx--) {
+        if (buf[idx] == L'\\') {
+            lastSlash = idx;
+            break;
+        }
+    }
+
+    if (lastSlash >= 0 && (USHORT)(lastSlash + 1) < numChars) {
+        shortName.Buffer = &buf[lastSlash + 1];
+        shortName.Length = (USHORT)((numChars - (lastSlash + 1)) * sizeof(WCHAR));
+        shortName.MaximumLength = shortName.Length;
+    } else {
+        shortName = *CreateInfo->ImageFileName;
+    }
 
     for (ULONG i = 0; i < g_RulesCount; i++) {
         UNICODE_STRING ruleName;
