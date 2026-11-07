@@ -1,0 +1,8 @@
+# Fin de ligne canonique pour les sources ; binaires en blob brut.
+* text=auto
+*.rs text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.png binary
+*.enc binary

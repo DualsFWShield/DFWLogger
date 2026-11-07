@@ -1,0 +1,44 @@
+[package]
+name = "dfwlogger"
+version = "0.2.0"
+edition = "2021"
+description = "Superviseur familial transparent : journal d'activité chiffré, applications, sessions, fichiers récents, connexions échouées, dashboard LAN."
+license = "MIT"
+readme = "README.md"
+keywords = ["windows", "parental-control", "monitoring", "activity-tracker", "egui"]
+categories = ["gui", "development-tools"]
+rust-version = "1.85"
+
+[dependencies]
+eframe = "0.27"
+egui = "0.27"
+windows = { version = "0.54", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_StationsAndDesktops",
+    "Win32_System_Threading",
+    "Win32_System_Registry",
+    "Win32_System_Memory",
+    "Win32_Security_Cryptography",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+base64 = "0.22"
+zeroize = "1"
+rpassword = "7"
+parselnk = "0.1"
+quick-xml = "0.31"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time"] }
+tokio-rustls = "0.25"
+rustls = "0.22"
+rcgen = "0.12"
+tray-icon = "0.26"
+rfd = "0.17"
+
+[profile.release]
+strip = true
+lto = "thin"

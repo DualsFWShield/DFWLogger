@@ -1,0 +1,109 @@
+name: Build & Release (Windows)
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dfwlogger-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain (stable)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Tests
+        run: cargo test
+
+      - name: Version + tag
+        id: ver
+        shell: pwsh
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUM: ${{ github.run_number }}
+        run: |
+          $cargo = ""
+          foreach ($line in Get-Content Cargo.toml) {
+            if ($line -match '^\s*version\s*=\s*"([^"]+)"') { $cargo = $Matches[1]; break }
+          }
+          if (-not $cargo) { throw "version introuvable dans Cargo.toml" }
+          if ($env:REF_TYPE -eq 'tag') {
+            $tag = $env:REF_NAME
+          } else {
+            # Versionnage automatique à chaque push : v<cargo-version>-b<numéro de build>
+            $tag = "v$cargo-b$env:RUN_NUM"
+          }
+          "version=$cargo" | Out-File -Append $env:GITHUB_OUTPUT
+          "tag=$tag" | Out-File -Append $env:GITHUB_OUTPUT
+          "Build $tag (cargo $cargo, run #$env:RUN_NUM)"
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package (exe + README)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target\release\dfwlogger.exe dist\dfwlogger.exe
+          Copy-Item README.md dist\README.md
+          $tag = "${{ steps.ver.outputs.tag }}"
+          Compress-Archive -Path dist\dfwlogger.exe, dist\README.md -DestinationPath "dfwlogger-$tag-win64.zip"
+          (Get-Item "dfwlogger-$tag-win64.zip").Length
+
+      - name: Upload artifact (tous les builds)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dfwlogger-win64
+          path: dfwlogger-*-win64.zip
+          if-no-files-found: error
+
+      # Publication : chaque push (et tag v*) crée/renouvelle une release versionnée.
+      - name: Publish release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = "${{ steps.ver.outputs.tag }}"
+          $zip = "dfwlogger-$tag-win64.zip"
+          $sha = "${{ github.sha }}".Substring(0, 7)
+          $notes = @(
+            "DFWLogger $($tag.Replace('-b', ' build '))",
+            "",
+            "- Windows 10/11 x64 — exe non signé (Windows SmartScreen peut demander *exécuter quand même*)",
+            "- Consignes : voir README dans le zip — `cargo` non requis pour utiliser l'exe",
+            "- Commit : $sha",
+            "- L'app est transparente : visible dans la barre des tâches, pas de keylogger ni de collecte distante"
+          ) -join "`r`n"
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip --clobber
+            if ($LASTEXITCODE -ne 0) { throw "upload: $tag" }
+            gh release edit $tag --latest --title "DFWLogger $tag" --notes $notes
+          } else {
+            gh release create $tag $zip --latest --title "DFWLogger $tag" --notes $notes --verify-tag 2>$null
+            if ($LASTEXITCODE -ne 0) { gh release create $tag $zip --latest --title "DFWLogger $tag" --notes $notes }
+          }
+          if ($LASTEXITCODE -ne 0) { throw "publish: $tag" }
+          gh release view $tag
