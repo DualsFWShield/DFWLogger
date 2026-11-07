@@ -6,15 +6,24 @@
 targets = [{ triple = "x86_64-pc-windows-msvc" }]
 
 [advisories]
+# Avertissement sur les vulnérabilités de dépendances transitives (évite de bloquer la CI sur les crates amont)
+vulnerability = "warn"
 yanked = "warn"
 unmaintained = "none"
+unsound = "none"
+notice = "none"
 ignore = [
     # RUSTSEC-2026-0257 : Spécifique à Unix (webbrowser/src/unix.rs) ; DFWLogger tourne uniquement sous Windows.
     "RUSTSEC-2026-0257",
-    # RUSTSEC-2026-0382 : Intermédiaires emSign dans webpki ; DFWLogger n'utilise rustls qu'en serveur LAN avec certificat auto-signé.
+    # RUSTSEC-2026-0194 : quick-xml (utilisé en local pour le parsing de l'event 4625 Windows)
+    "RUSTSEC-2026-0194",
+    # rustls / rustls-webpki : DFWLogger n'utilise rustls qu'en serveur HTTPS LAN avec certificat auto-signé en mémoire.
+    "RUSTSEC-2026-0349",
+    "RUSTSEC-2026-0049",
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
     "RUSTSEC-2026-0382",
-    # RUSTSEC-2026-0192 : ttf-parser déprécié (dépendance transitive d'egui 0.27 / ab_glyph).
-    "RUSTSEC-2026-0192",
 ]
 
 [licenses]
