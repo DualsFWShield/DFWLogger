@@ -8,36 +8,58 @@ use egui::Context;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-/// Dessine l'icône en RGBA brut (carré arrondi bleu, œil stylisé) — pas de dépendance image.
-pub fn ico_rgba() -> (Vec<u8>, u32, u32) {
-    const S: u32 = 32;
-    const CORNERS: [(u32, u32); 20] = [
-        (2, 2), (3, 1), (4, 1), (1, 3), (1, 4),
-        (29, 2), (28, 1), (27, 1), (30, 3), (30, 4),
-        (2, 29), (3, 30), (4, 30), (1, 28), (1, 27),
-        (29, 29), (28, 30), (27, 30), (30, 28), (30, 27),
-    ];
-    let mut rgba = Vec::with_capacity((S * S * 4) as usize);
-    for y in 0..S {
-        for x in 0..S {
-            let transparent = CORNERS.iter().any(|&(cx, cy)| x == cx && y == cy);
-            let dx = i64::from(x) - 16;
-            let dy = i64::from(y) - 16;
-            let dist = dx * dx + dy * dy;
-            let color: (u8, u8, u8, u8) = if transparent {
-                (0, 0, 0, 0)
-            } else if dist < 144 {
-                (255, 255, 255, 255) // pupille blanche
-            } else if dist < 900 {
-                (16, 22, 38, 255) // anneau sombre
-            } else {
-                (79, 140, 255, 255) // carré bleu
-            };
-            let (r, g, b, a) = color;
-            rgba.extend_from_slice(&[r, g, b, a]);
+/// Nouvelle icône DFWLogger : bouclier protecteur avec œil (design SVG),
+/// dessinée à la volée via le crate `resvg` (source SVG embarquée).
+const ICON_SVG: &str = r##"
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B9CFF"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <path d="M256 88 L56 160 V256 C56 372 170 444 256 488 C342 444 456 372 456 256 V160 Z" fill="#FFFFFF"/>
+  <ellipse cx="256" cy="256" rx="88" ry="64" fill="#1D4ED8"/>
+  <circle cx="256" cy="256" r="28" fill="#FFFFFF"/>
+</svg>
+"##;
+
+/// Dessine l'icône SVG (RGBA, taille carrée) et retourne les octets bruts
+/// (32 bits par pixel : R, G, B, A — rangées de haut en bas).
+fn render_svg_rgba(svg: &str, size: u32) -> Option<Vec<u8>> {
+    use resvg::tiny_skia;
+    use resvg::usvg;
+    let opt = usvg::Options::default();
+    let tree = usvg::Tree::from_data(svg.as_bytes(), &opt).ok()?;
+    let scale = size as f32 / tree.size().width();
+    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+    resvg::render(&tree, tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
+    let data = pixmap.data();
+    let mut rgba = Vec::with_capacity(data.len());
+    for chunk in data.chunks_exact(4) {
+        let a = chunk[3] as u32;
+        if a == 0 {
+            rgba.extend_from_slice(&[0, 0, 0, 0]);
+        } else if a == 255 {
+            rgba.extend_from_slice(chunk);
+        } else {
+            let r = ((chunk[0] as u32 * 255 + a / 2) / a).min(255) as u8;
+            let g = ((chunk[1] as u32 * 255 + a / 2) / a).min(255) as u8;
+            let b = ((chunk[2] as u32 * 255 + a / 2) / a).min(255) as u8;
+            rgba.extend_from_slice(&[r, g, b, a as u8]);
         }
     }
-    (rgba, S, S)
+    Some(rgba)
+}
+
+/// Icône DFWLogger actuelle (SVG « bouclier + œil »), rendue en RGBA brut 32×32.
+pub fn ico_rgba() -> (Vec<u8>, u32, u32) {
+    const SIZE: u32 = 32;
+    match render_svg_rgba(ICON_SVG, SIZE) {
+        Some(rgba) if rgba.len() == (SIZE * SIZE * 4) as usize => (rgba, SIZE, SIZE),
+        _ => (vec![79, 140, 255, 255].repeat((SIZE * SIZE) as usize), SIZE, SIZE),
+    }
 }
 
 pub fn spawn_tray(shared: Arc<Shared>, ctx: Context) {
@@ -121,5 +143,20 @@ fn tray_loop(shared: Arc<Shared>, ctx: Context) {
             ctx.request_repaint();
         }
         std::thread::sleep(std::time::Duration::from_millis(120));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_svg_rendering_output() {
+        let (rgba, w, h) = ico_rgba();
+        assert_eq!(w, 32);
+        assert_eq!(h, 32);
+        assert_eq!(rgba.len(), (32 * 32 * 4) as usize);
+        let has_visible_pixels = rgba.chunks_exact(4).any(|p| p[3] > 0);
+        assert!(has_visible_pixels, "L'icône SVG rendue doit contenir des pixels visibles");
     }
 }

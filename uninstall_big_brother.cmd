@@ -1,6 +1,12 @@
 @echo off
 rem ============================================================================
-rem  DFWLogger - Desinstallation propre de Big Brother & Serbert
+rem  DFWLogger - DESINSTALLATEUR UNIQUE
+rem  Desinstallation complete de l'application :
+rem   - Retrait des protections Big Brother / Serbert (SYSTEM + Ring 0)
+rem   - Arret et suppression des services Windows
+rem   - Restauration DNS / hosts / registre / quotas
+rem   - Suppression des raccourcis (Bureau + menu Demarrer)
+rem   - Suppression des dossiers applicatifs et des donnees utilisateur
 rem ============================================================================
 setlocal EnableDelayedExpansion
 
@@ -12,9 +18,8 @@ if %errorlevel% neq 0 (
 )
 
 echo ============================================================================
-echo   DFWLogger - Desinstallation de Big Brother & Serbert
+echo   DFWLogger - DESINSTALLATION UNIE
 echo ============================================================================
-echo.
 
 set "EXE=%~dp0dfwlogger.exe"
 if not exist "%EXE%" (
@@ -25,46 +30,51 @@ if not exist "%EXE%" (
     )
 )
 
+echo [1/8] Arret de l'application et retrait des protections...
 if exist "%EXE%" (
-    echo [1/4] Retrait des protections via dfwlogger.exe --uninstall-bigbrother...
+    taskkill /F /IM dfwlogger.exe >nul 2>&1
     "%EXE%" --uninstall-bigbrother --quiet
 )
 
-rem Arret et suppression du service et du pilote noyau
-echo [2/4] Arret et suppression des services Windows...
+echo [2/8] Arret et suppression des services Windows...
 sc stop DFWLoggerBigBrother >nul 2>&1
 sc delete DFWLoggerBigBrother >nul 2>&1
-sc stop DFWLoggerGuard >nul 2>&1
-sc delete DFWLoggerGuard >nul 2>&1
 sc stop Serbert >nul 2>&1
 sc delete Serbert >nul 2>&1
 
-rem Nettoyage registre
-echo [3/4] Nettoyage du registre machine (MSI et SRP)...
+echo [3/8] Nettoyage du registre...
 reg delete "HKLM\Software\Policies\Microsoft\Windows\Installer" /v "DisableMSI" /f >nul 2>&1
 
-rem Vidage DNS
-echo [4/4] Vidage du cache DNS...
+echo [4/8] Vidage du cache DNS...
 ipconfig /flushdns >nul 2>&1
 
-echo.
-echo Voulez-vous supprimer definitivement le dossier de configuration
-set /p "CLEAN_DATA=C:\ProgramData\DFWLogger ? (O/N, defaut: O) : "
-if /i not "%CLEAN_DATA%"=="N" (
-    if exist "%ProgramData%\DFWLogger" (
-        rmdir /s /q "%ProgramData%\DFWLogger" >nul 2>&1
-        echo [OK] Dossier %ProgramData%\DFWLogger supprime.
-    )
+echo [5/8] Suppression des raccourcis (Bureau + menu Demarrer)...
+powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $desktop = [Environment]::GetFolderPath('Desktop'); $lnk1 = Join-Path $desktop 'DFWLogger.lnk'; if (Test-Path $lnk1) { Remove-Item $lnk1 -Force }; $sm = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\DFWLogger'; if (Test-Path $sm) { Remove-Item -Recurse -Force $sm }"
+
+echo [6/8] Suppression du dossier de l application...
+set /p "CLEAN_APP=Effacer le dossier de l application %LOCALAPPDATA%\Programs\DFWLogger ? (O/N, defaut: O) : "
+if /i "%CLEAN_APP%"=="O" (
+    powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '%LOCALAPPDATA%\Programs\DFWLogger'"
+)
+
+echo [7/8] Suppression des donnees utilisateur...
+set /p "CLEAN_DATA=Effacer les donnees utilisateur (journal + configuration) %LOCALAPPDATA%\DFWLogger ? (O/N, defaut: O) : "
+if /i "%CLEAN_DATA%"=="O" (
+    powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '%LOCALAPPDATA%\DFWLogger'"
+)
+
+echo [8/8] Suppression des donnees Big Brother (politique + etat)...
+set /p "CLEAN_BB=Effacer les donnees Big Brother (politique + etat) %ProgramData%\DFWLogger ? (O/N, defaut: O) : "
+if /i "%CLEAN_BB%"=="O" (
+    powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '%ProgramData%\DFWLogger'"
 )
 
 echo.
 echo ============================================================================
-echo   [SUCCES] Big Brother et Serbert ont ete completement desinstalles.
+echo   [SUCCES] DFWLogger a ete completement desinstalle.
+echo   - Protections Big Brother / Serbert retirees.
 echo   - Services Windows supprimes.
-echo   - Pilote noyau Serbert decharge.
-echo   - Fichier hosts et registre restaures.
-echo   - Cache DNS vide.
+echo   - Raccourcis et dossiers nettoyes.
 echo ============================================================================
 echo.
 pause
-
