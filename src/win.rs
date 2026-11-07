@@ -287,3 +287,122 @@ pub fn can_read_security_log() -> bool {
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
+
+/// Exécute un script PowerShell de manière sécurisée et non-interactive via -EncodedCommand.
+fn run_powershell_encoded(script: &str) -> Result<(), String> {
+    use base64::Engine;
+    let utf16: Vec<u8> = script
+        .encode_utf16()
+        .flat_map(|u| u.to_le_bytes())
+        .collect();
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&utf16);
+
+    let status = std::process::Command::new("powershell")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", &b64])
+        .status()
+        .map_err(|e| format!("lancement powershell : {e}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("powershell a retourné le code : {:?}", status.code()))
+    }
+}
+
+/// Crée les raccourcis sur le Bureau et dans le Menu Démarrer.
+pub fn create_shortcuts() -> Result<(), String> {
+    create_shortcuts_in(None, None)
+}
+
+/// Version paramétrable pour tests ou environnements spécifiques.
+pub fn create_shortcuts_in(custom_desktop: Option<&str>, custom_start_menu: Option<&str>) -> Result<(), String> {
+    let desktop_setup = match custom_desktop {
+        Some(d) => format!("$desktop = '{}'", d.replace('\'', "''")),
+        None => "$desktop = [Environment]::GetFolderPath('Desktop'); if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE 'Desktop' }".to_string(),
+    };
+    let start_menu_setup = match custom_start_menu {
+        Some(s) => format!("$startMenu = '{}'", s.replace('\'', "''")),
+        None => "$startMenu = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\\DFWLogger'".to_string(),
+    };
+
+    let script = format!(r#"
+$ws = New-Object -ComObject WScript.Shell
+{desktop_setup}
+{start_menu_setup}
+$target = Join-Path $env:LOCALAPPDATA 'Programs\DFWLogger\dfwlogger.exe'
+
+if (-not (Test-Path $desktop)) {{
+    New-Item -ItemType Directory -Force -Path $desktop | Out-Null
+}}
+$s1 = $ws.CreateShortcut((Join-Path $desktop 'DFWLogger.lnk'))
+$s1.TargetPath = $target
+$s1.IconLocation = "$target,0"
+$s1.Description = 'Superviseur familial transparent'
+$s1.Save()
+
+if (-not (Test-Path $startMenu)) {{
+    New-Item -ItemType Directory -Force -Path $startMenu | Out-Null
+}}
+$s2 = $ws.CreateShortcut((Join-Path $startMenu 'DFWLogger.lnk'))
+$s2.TargetPath = $target
+$s2.IconLocation = "$target,0"
+$s2.Description = 'Superviseur familial transparent'
+$s2.Save()
+"#);
+    run_powershell_encoded(&script)
+}
+
+/// Supprime les raccourcis du Bureau et du Menu Démarrer.
+pub fn remove_shortcuts() -> Result<(), String> {
+    remove_shortcuts_in(None, None)
+}
+
+/// Version paramétrable pour tests ou environnements spécifiques.
+pub fn remove_shortcuts_in(custom_desktop: Option<&str>, custom_start_menu: Option<&str>) -> Result<(), String> {
+    let desktop_setup = match custom_desktop {
+        Some(d) => format!("$desktop = '{}'", d.replace('\'', "''")),
+        None => "$desktop = [Environment]::GetFolderPath('Desktop'); if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE 'Desktop' }".to_string(),
+    };
+    let start_menu_setup = match custom_start_menu {
+        Some(s) => format!("$startMenu = '{}'", s.replace('\'', "''")),
+        None => "$startMenu = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\\DFWLogger'".to_string(),
+    };
+
+    let script = format!(r#"
+{desktop_setup}
+{start_menu_setup}
+$l1 = Join-Path $desktop 'DFWLogger.lnk'
+if (Test-Path $l1) {{ Remove-Item -Force $l1 }}
+
+if (Test-Path $startMenu) {{ Remove-Item -Recurse -Force $startMenu }}
+"#);
+    run_powershell_encoded(&script)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shortcuts_cycle() {
+        let temp = std::env::temp_dir().join("dfwlogger_shortcuts_test");
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+        let desktop = temp.join("Desktop");
+        let start_menu = temp.join("StartMenu");
+        std::fs::create_dir_all(&desktop).unwrap();
+        std::fs::create_dir_all(&start_menu).unwrap();
+
+        let d_str = desktop.to_str().unwrap();
+        let sm_str = start_menu.to_str().unwrap();
+
+        assert!(create_shortcuts_in(Some(d_str), Some(sm_str)).is_ok(), "create_shortcuts doit réussir");
+        assert!(desktop.join("DFWLogger.lnk").exists(), "DFWLogger.lnk doit exister sur le Desktop");
+        assert!(start_menu.join("DFWLogger.lnk").exists(), "DFWLogger.lnk doit exister dans le StartMenu");
+
+        assert!(remove_shortcuts_in(Some(d_str), Some(sm_str)).is_ok(), "remove_shortcuts doit réussir");
+        assert!(!desktop.join("DFWLogger.lnk").exists(), "DFWLogger.lnk doit être supprimé du Desktop");
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+}

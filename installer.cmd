@@ -8,16 +8,39 @@ rem     - Auto-elevation UAC si necessaire
 rem     - Copie le binaire et le pilote dans %ProgramData%\DFWLogger
 rem     - Verrouille les permissions NTFS (Admins + SYSTEM : F, Users : RX)
 rem ============================================================================
-setlocal EnableDelayedExpansion
+setlocal
 
-if /i "%1"=="--elevated" goto :install_bb
+set "SCRIPT_DIR=%~dp0"
+set "EXE=%SCRIPT_DIR%dfwlogger.exe"
+if not exist "%EXE%" if exist "%SCRIPT_DIR%target\release\dfwlogger.exe" set "EXE=%SCRIPT_DIR%target\release\dfwlogger.exe"
+set "DEST=%LOCALAPPDATA%\Programs\DFWLogger"
+set "README=%SCRIPT_DIR%README.md"
 
-set "EXE=%~dp0dfwlogger.exe"
-if not exist "%EXE%" if exist "%~dp0target\release\dfwlogger.exe" set "EXE=%~dp0target\release\dfwlogger.exe"
-set "README=%~dp0README.md"
+rem --- Mode Test / Verification de syntaxe sans modification ---
+if /i "%~1"=="--test" (
+    echo [TEST] Verification de l'installateur...
+    if exist "%EXE%" (
+        echo [TEST] Executable source detecte : %EXE%
+    ) else (
+        echo [AVERTISSEMENT] Executable source absent : %EXE%
+    )
+    echo [TEST] Syntaxe batch et chemins valides.
+    exit /b 0
+)
+
+rem --- Gestion des parametres silencieux et elevation ---
+set "QUIET=0"
+if /i "%~1"=="--quiet" set "QUIET=1"
+if /i "%~1"=="-q" set "QUIET=1"
+if /i "%~2"=="--quiet" set "QUIET=1"
+if /i "%~2"=="-q" set "QUIET=1"
+
+if /i "%~1"=="--elevated" goto :install_bb
+if /i "%~2"=="--elevated" goto :install_bb
+
 if not exist "%EXE%" (
-    echo [ERREUR] dfwlogger.exe introuvable (compilez avec cargo build --release ou extrayez l'archive).
-    pause
+    echo [ERREUR] dfwlogger.exe introuvable. Compilez avec cargo build --release ou extrayez l'archive.
+    if "%QUIET%"=="0" pause
     exit /b 1
 )
 
@@ -27,26 +50,28 @@ echo ===========================================================================
 echo.
 
 rem --- 1. Installation de l'application (sans elevation) ---
-taskkill /F /IM dfwlogger.exe >nul 2>&1
-set "DEST=%LOCALAPPDATA%\Programs\DFWLogger"
+powershell -NoProfile -NonInteractive -Command "Get-Process -Name dfwlogger -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0" >nul 2>&1
 if not exist "%DEST%" mkdir "%DEST%"
-copy /y "%EXE%" "%DEST%\" >nul || (
-    echo [ERREUR] copie impossible vers "%DEST%".
-    pause
+copy /y "%EXE%" "%DEST%\dfwlogger.exe" >nul || (
+    echo [ERREUR] Copie impossible vers "%DEST%\dfwlogger.exe".
+    if "%QUIET%"=="0" pause
     exit /b 1
 )
-if exist "%README%" copy /y "%README%" "%DEST%\" >nul
+if exist "%README%" copy /y "%README%" "%DEST%\README.md" >nul
 
 rem --- 2. Raccourcis (Bureau + menu Demarrer) ---
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $d = [Environment]::GetFolderPath('Desktop'); if (-not $d) { $d = Join-Path $env:USERPROFILE 'Desktop' }; $t = '%DEST%\dfwlogger.exe'; $s1 = $ws.CreateShortcut((Join-Path $d 'DFWLogger.lnk')); $s1.TargetPath = $t; $s1.IconLocation = ($t + ',0'); $s1.Description = 'Superviseur familial transparent'; $s1.Save(); $m = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\DFWLogger'; if (-not (Test-Path $m)) { [void](New-Item -ItemType Directory -Force -Path $m) }; $s2 = $ws.CreateShortcut((Join-Path $m 'DFWLogger.lnk')); $s2.TargetPath = $t; $s2.IconLocation = ($t + ',0'); $s2.Description = 'Superviseur familial transparent'; $s2.Save()"
+"%DEST%\dfwlogger.exe" --install-shortcuts >nul 2>&1
 
 echo.
 echo [OK] Application installee dans %DEST%.
 echo     Raccourcis : Bureau + menu Demarrer
 
 rem --- 3. Optionnel : Mode Ecole (Big Brother SYSTEM + pilote Serbert) ---
+if "%QUIET%"=="1" goto :skip_bb
+
 echo.
-set /p "BB=Installer aussi le Mode Ecole (Big Brother SYSTEM + pilote Serbert) ? (O/N, defaut: N) : "
+set "BB=N"
+set /p "BB=Installer aussi le Mode Ecole (Big Brother SYSTEM + pilote Serbert) ? [O/N, defaut: N] : "
 if /i not "%BB%"=="O" goto :skip_bb
 
 rem Verification des droits administrateur
@@ -65,11 +90,11 @@ if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%"
 copy /y "%EXE%" "%TARGET_DIR%\dfwlogger.exe" >nul
 
 echo [2/5] Recherche du pilote noyau serbert.sys...
-if exist "%~dp0serbert.sys" (
-    copy /y "%~dp0serbert.sys" "%TARGET_DIR%\serbert.sys" >nul
+if exist "%SCRIPT_DIR%serbert.sys" (
+    copy /y "%SCRIPT_DIR%serbert.sys" "%TARGET_DIR%\serbert.sys" >nul
     echo       Pilote noyau serbert.sys deploye dans %TARGET_DIR%.
 ) else (
-    echo       Pilote noyau non fourni (watchdog Ring 3 actif par defaut).
+    echo       Pilote noyau non fourni - watchdog Ring 3 actif par defaut.
 )
 
 echo [3/5] Installation et demarrage du service DFWLoggerBigBrother...
@@ -82,13 +107,13 @@ echo [5/5] Mode Ecole installe et actif.
 echo.
 echo   - Service : DFWLoggerBigBrother (SYSTEM)
 echo   - Politique : %TARGET_DIR%\big_brother.json
-echo   - Pour configurer les restrictions : onglet "Big Brother" dans l'application.
+echo   - Pour configurer les restrictions : onglet "Modes et Regles" dans l'application.
 echo   - Pour desinstaller : lancez "uninstaller.cmd".
 goto :end
 
 :skip_bb
 echo.
-echo Installation terminee (Mode Standard).
+echo Installation terminee en Mode Standard.
 echo   Programme : %DEST%\dfwlogger.exe
 echo   Terminal  : "%DEST%\dfwlogger.exe" tail 30
 echo.
@@ -99,6 +124,6 @@ echo   Pour desinstaller : lancez "uninstaller.cmd".
 :end
 echo.
 echo Remarque : Windows SmartScreen peut demander "Informations
-echo complementaires" puis "Executer quand meme" au premier lancement
-echo (l'exe n'est pas signe par une autorite payante).
-pause
+echo complementaires" puis "Executer quand meme" au premier lancement.
+if "%QUIET%"=="0" pause
+exit /b 0

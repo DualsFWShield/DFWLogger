@@ -85,6 +85,32 @@ fn main() -> eframe::Result<()> {
 
     let quiet = args.iter().any(|a| a == "--quiet" || a == "-q" || a == "--silent");
 
+    // Gestion des raccourcis Bureau + Menu Démarrer
+    if args.iter().any(|a| a == "--install-shortcuts") {
+        match win::create_shortcuts() {
+            Ok(()) => {
+                println!("Raccourcis crees avec succes (Bureau + Menu Demarrer).");
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("Erreur creation raccourcis : {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+    if args.iter().any(|a| a == "--uninstall-shortcuts") {
+        match win::remove_shortcuts() {
+            Ok(()) => {
+                println!("Raccourcis supprimes.");
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("Erreur suppression raccourcis : {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Commandes des 3 Modes : Standard, Admin, Kernel
     if let Some(pos) = args.iter().position(|a| a == "--mode") {
         let requested = args.get(pos + 1).map(|s| s.to_ascii_lowercase());

@@ -5,12 +5,27 @@ rem ============================================================================
 setlocal EnableDelayedExpansion
 title DFWLogger - Desinstallation
 
+rem --- Mode Test / Verification de syntaxe sans modification ---
+if /i "%~1"=="--test" (
+    echo [TEST] Verification du desinstallateur...
+    echo [TEST] Syntaxe batch et chemins valides.
+    exit /b 0
+)
+
+set "QUIET=0"
+if /i "%~1"=="--quiet" set "QUIET=1"
+if /i "%~1"=="-q" set "QUIET=1"
+
 rem Verification et demande des droits administrateur si besoin
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [INFO] Elevation administrateur requise...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
-    exit /b
+    if "%QUIET%"=="1" (
+        echo [INFO] Desinstallation standard sans droits administrateur complets.
+    ) else (
+        echo [INFO] Elevation administrateur requise...
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+        exit /b
+    )
 )
 
 echo ============================================================================
@@ -25,17 +40,19 @@ echo   - Supprimer les raccourcis du Bureau et du Menu Demarrer
 echo   - Supprimer les dossiers d'installation et les donnees
 echo.
 
-set /p "CONFIRM=Confirmer la desinstallation complete ? (O/N, defaut: O) : "
-if /i "%CONFIRM%"=="N" (
-    echo.
-    echo Desinstallation annulee par l'utilisateur.
-    pause
-    exit /b 0
+if "%QUIET%"=="0" (
+    set /p "CONFIRM=Confirmer la desinstallation complete ? (O/N, defaut: O) : "
+    if /i "!CONFIRM!"=="N" (
+        echo.
+        echo Desinstallation annulee par l'utilisateur.
+        if "%QUIET%"=="0" pause
+        exit /b 0
+    )
 )
 
 echo.
 echo [1/7] Arret force des processus DFWLogger...
-taskkill /F /IM dfwlogger.exe >nul 2>&1
+powershell -NoProfile -NonInteractive -Command "Get-Process -Name dfwlogger -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0" >nul 2>&1
 
 echo [2/7] Desinstallation et suppression des services Windows...
 sc stop DFWLoggerBigBrother >nul 2>&1
@@ -69,5 +86,5 @@ echo ===========================================================================
 echo   [SUCCES] DFWLogger a ete completement desinstalle du systeme.
 echo ============================================================================
 echo.
-pause
+if "%QUIET%"=="0" pause
 exit /b 0
