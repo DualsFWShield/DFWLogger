@@ -246,6 +246,37 @@ pub fn message_box(title: &str, text: &str) {
     }
 }
 
+/// Rendre visible et amener au premier plan la fenêtre principale de DFWLogger.
+/// Fonctionne même si la fenêtre a été masquée dans le tray (Visible(false) ou SW_HIDE)
+/// ou minimisée.
+pub fn show_main_window() {
+    unsafe {
+        use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
+        use windows::Win32::System::Threading::GetCurrentProcessId;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            EnumWindows, GetWindow, GetWindowThreadProcessId, SetForegroundWindow, ShowWindow,
+            GW_OWNER, SW_RESTORE, SW_SHOW,
+        };
+
+        let my_pid = GetCurrentProcessId();
+
+        unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            let target_pid = lparam.0 as u32;
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid == target_pid && GetWindow(hwnd, GW_OWNER).0 == 0 {
+                let _ = ShowWindow(hwnd, SW_SHOW);
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+                let _ = SetForegroundWindow(hwnd);
+                return BOOL(0);
+            }
+            BOOL(1)
+        }
+
+        let _ = EnumWindows(Some(enum_proc), LPARAM(my_pid as isize));
+    }
+}
+
 /// Vérifie (une fois) si le journal Security est lisible — nécessite une session élevée.
 #[allow(dead_code)]
 pub fn can_read_security_log() -> bool {

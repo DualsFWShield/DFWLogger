@@ -51,10 +51,37 @@ pub struct DfwApp {
     big_brother_window_from: String,
     big_brother_window_to: String,
     big_brother_window_weekdays_only: bool,
+    last_status_check: std::time::Instant,
 }
 
 impl DfwApp {
+    pub fn current_tier(&self) -> crate::big_brother::PrivilegeTier {
+        if self.serbert_driver_running {
+            crate::big_brother::PrivilegeTier::Kernel
+        } else if self.big_brother_status.as_deref() == Some("RUNNING") {
+            crate::big_brother::PrivilegeTier::Admin
+        } else {
+            crate::big_brother::PrivilegeTier::Standard
+        }
+    }
+
     pub fn new(cc: &eframe::CreationContext<'_>, shared: Arc<Shared>) -> Self {
+        // Chargement des polices natives Windows pour éliminer tout caractère manquant (tofu □)
+        let mut fonts = egui::FontDefinitions::default();
+        if let Ok(data) = std::fs::read("C:\\Windows\\Fonts\\segoeui.ttf") {
+            fonts.font_data.insert("segoe_ui".to_owned(), egui::FontData::from_owned(data));
+            if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                prop.insert(0, "segoe_ui".to_owned());
+            }
+        }
+        if let Ok(data) = std::fs::read("C:\\Windows\\Fonts\\seguiemj.ttf") {
+            fonts.font_data.insert("segoe_emoji".to_owned(), egui::FontData::from_owned(data));
+            if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                prop.push("segoe_emoji".to_owned());
+            }
+        }
+        cc.egui_ctx.set_fonts(fonts);
+
         // Icône tray : le thread vit tout le processus ; il demande les repaints
         // de l'UI via le Context egui.
         crate::tray::spawn_tray(shared.clone(), cc.egui_ctx.clone());
@@ -108,6 +135,7 @@ impl DfwApp {
             big_brother_window_from,
             big_brother_window_to,
             big_brother_window_weekdays_only,
+            last_status_check: std::time::Instant::now(),
         };
         // Reprise automatique via DPAPI si dispo.
         let mut store_guard = app.shared.store.lock().unwrap();
@@ -215,7 +243,7 @@ impl DfwApp {
     fn draw_unlock_screen(&mut self, ui: &mut egui::Ui, fresh: bool) {
         ui.vertical_centered(|ui| {
             ui.add_space(40.0);
-            ui.heading("🔐 DFWLogger");
+            ui.heading("⛨ DFWLogger");
             ui.add_space(4.0);
             if fresh {
                 ui.label("Première utilisation : définissez le mot de passe parent.");
@@ -228,9 +256,9 @@ impl DfwApp {
                 let pass_edit = egui::TextEdit::singleline(&mut self.password)
                     .password(!self.show_password)
                     .hint_text("Mot de passe parent")
-                    .desired_width(280.0);
+                    .desired_width(260.0);
                 ui.add(pass_edit);
-                let eye = if self.show_password { "🙈" } else { "👁" };
+                let eye = if self.show_password { "Masquer" } else { "Afficher" };
                 if ui.button(eye).on_hover_text(if self.show_password { "Masquer le mot de passe" } else { "Afficher le mot de passe" }).clicked() {
                     self.show_password = !self.show_password;
                 }
@@ -242,7 +270,7 @@ impl DfwApp {
                     let confirm_edit = egui::TextEdit::singleline(&mut self.confirm)
                         .password(!self.show_password)
                         .hint_text("Confirmation")
-                        .desired_width(280.0);
+                        .desired_width(260.0);
                     ui.add(confirm_edit);
                 });
             }
@@ -262,12 +290,12 @@ impl DfwApp {
     fn draw_status(&mut self, ui: &mut egui::Ui) {
         let opened = self.shared.store.lock().unwrap().is_open();
         let st = self.shared.status.lock().unwrap().clone();
-        ui.heading("🩺 État");
+        ui.heading("● État");
         ui.add_space(6.0);
 
         egui::Grid::new("status-grid").striped(true).num_columns(2).show(ui, |ui| {
             ui.label("Journal");
-            ui.label(if opened { "🔓 déverrouillé — collecte active" } else { "🔒 verrouillé" });
+            ui.label(if opened { "● déverrouillé — collecte active" } else { "■ verrouillé" });
             ui.end_row();
 
             ui.label("Surveillance session");
@@ -289,25 +317,25 @@ impl DfwApp {
                 format!(" — {}", st.security_note)
             };
             ui.label(if st.elevated && st.security_ok {
-                format!("✅ actif{note}")
+                format!("✓ actif{note}")
             } else if st.elevated {
-                format!("⛔ {note}")
+                format!("✕ {note}")
             } else {
-                format!("ⓘ nécessite élévation{note}")
+                format!("i nécessite élévation{note}")
             });
             ui.end_row();
 
             ui.label("Dashboard réseau");
             ui.label(match (&st.dashboard_error, st.dashboard_listening) {
-                (None, true) => format!("✅ en écoute (port {})", self.shared.config.lock().unwrap().dashboard_port),
-                (Some(e), _) => format!("⛔ {e}"),
-                (None, false) => "ⓘ éteint".to_string(),
+                (None, true) => format!("✓ en écoute (port {})", self.shared.config.lock().unwrap().dashboard_port),
+                (Some(e), _) => format!("✕ {e}"),
+                (None, false) => "… inactif".to_string(),
             });
             ui.end_row();
         });
 
         ui.add_space(10.0);
-        ui.heading("📊 Compteurs (depuis le déverrouillage)");
+        ui.heading("≡ Compteurs (depuis le déverrouillage)");
         ui.add_space(4.0);
         let counts = self.shared.counts.lock().unwrap();
         egui::Grid::new("counts-grid").striped(true).num_columns(2).show(ui, |ui| {
@@ -319,7 +347,7 @@ impl DfwApp {
         });
         drop(counts);
         ui.add_space(14.0);
-        ui.heading("⏱ Temps par application (depuis le déverrouillage)");
+        ui.heading("◷ Temps par application (depuis le déverrouillage)");
         ui.add_space(4.0);
         let tops = self.shared.top_apps(12);
         if tops.is_empty() {
@@ -354,7 +382,7 @@ impl DfwApp {
         }
 
         ui.add_space(14.0);
-        ui.heading("🗓 Usage par jour et par heure (7 derniers jours)");
+        ui.heading("▦ Usage par jour et par heure (7 derniers jours)");
         ui.add_space(4.0);
         draw_heatmap(ui, &self.shared);
 
@@ -362,16 +390,16 @@ impl DfwApp {
         draw_update_section(ui, &self.shared, &mut self.info, &mut self.err);
 
         ui.add_space(10.0);
-        if ui.button("🔒 Verrouiller le journal maintenant").clicked() {
+        if ui.button("■ Verrouiller le journal maintenant").clicked() {
             self.do_lock();
         }
     }
 
     fn draw_events(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("📜 Événements (mémoire)");
+            ui.heading("≡ Événements (mémoire)");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("📄 Exporter en CSV…").clicked() {
+                if ui.button("▤ Exporter en CSV…").clicked() {
                     match export_csv(&self.shared) {
                         Ok(path) => {
                             self.info = Some(format!("CSV exporté : {}", path.display()));
@@ -388,7 +416,7 @@ impl DfwApp {
         ui.add_space(4.0);
         let monitoring = self.shared.monitoring.load(Ordering::Relaxed);
         if !monitoring {
-            ui.label("🔒 Déverrouillez le journal pour consulter les événements.");
+            ui.label("■ Déverrouillez le journal pour consulter les événements.");
             return;
         }
         let events: Vec<crate::model::Event> = self
@@ -421,7 +449,7 @@ impl DfwApp {
     }
 
     fn draw_settings(&mut self, ui: &mut egui::Ui) {
-        ui.heading("⚙️ Réglages");
+        ui.heading("⚙ Réglages");
         ui.add_space(6.0);
         let mut cfg = self.shared.config.lock().unwrap().clone();
         let dir = store_dir(&self.shared);
@@ -430,7 +458,7 @@ impl DfwApp {
         let admin_required = cfg.admin_phc.is_some();
         if admin_required && !self.admin_unlocked {
             ui.group(|ui| {
-                ui.label("🔒 Réglages protégés par le mot de passe admin");
+                ui.label("■ Réglages protégés par le mot de passe admin");
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.add(
@@ -439,7 +467,7 @@ impl DfwApp {
                             .hint_text("Mot de passe admin")
                             .desired_width(220.0),
                     );
-                    let eye = if self.show_admin_password { "🙈" } else { "👁" };
+                    let eye = if self.show_admin_password { "Masquer" } else { "Afficher" };
                     if ui.button(eye).on_hover_text(if self.show_admin_password { "Masquer" } else { "Afficher" }).clicked() {
                         self.show_admin_password = !self.show_admin_password;
                     }
@@ -463,9 +491,9 @@ impl DfwApp {
 
         ui.group(|ui| {
             ui.label(if admin_required {
-                "🔓 Protection admin active (déverrouillée pour cette session)"
+                "● Protection admin active (déverrouillée pour cette session)"
             } else {
-                "🔓 Aucun mot de passe admin — quiconque ouvre cette fenêtre peut modifier les réglages"
+                "○ Aucun mot de passe admin — quiconque ouvre cette fenêtre peut modifier les réglages"
             });
             ui.label(
                 egui::RichText::new(
@@ -562,7 +590,7 @@ impl DfwApp {
 
         ui.add_space(6.0);
         ui.group(|ui| {
-            ui.label("🔔 Notifications Windows");
+            ui.label("Notifications Windows");
             ui.checkbox(&mut cfg.notify_lock, "Prévenir quand la session est verrouillée");
             ui.checkbox(
                 &mut cfg.notify_failed_logon,
@@ -582,7 +610,7 @@ impl DfwApp {
 
         ui.add_space(6.0);
         ui.group(|ui| {
-            ui.label("🔄 Vérification de mise à jour");
+            ui.label("↻ Vérification de mise à jour");
             let mut repo = cfg.github_repo.clone().unwrap_or_default();
             ui.add(
                 egui::TextEdit::singleline(&mut repo)
@@ -610,9 +638,9 @@ impl DfwApp {
             ui.label("Journal Security — échecs de connexion (élévation optionnelle)");
             let st = self.shared.status.lock().unwrap();
             if st.elevated {
-                ui.label("✅ L'application tourne avec élévation.");
+                ui.label("✓ L'application tourne avec élévation.");
             } else {
-                ui.label("⌛ La lecture du journal Security (événement 4625) nécessite une session admin.");
+                ui.label("… La lecture du journal Security (événement 4625) nécessite une session admin.");
                 if ui.button("Relancer avec élévation…").clicked() {
                     drop(st);
                     let mut cfg2 = self.shared.config.lock().unwrap().clone();
@@ -631,7 +659,7 @@ impl DfwApp {
         // ---- Administration du mot de passe admin ----
         ui.group(|ui| {
             if admin_required {
-                ui.label("🔐 Mot de passe admin");
+                ui.label("⛨ Mot de passe admin");
                 if ui.button("Désactiver la protection").clicked() {
                     cfg.admin_phc = None;
                     self.admin_unlocked = true;
@@ -648,7 +676,7 @@ impl DfwApp {
                     self.admin_unlocked = false;
                 }
             } else {
-                ui.label("🔐 Créer un mot de passe admin (protéger les réglages)");
+                ui.label("⛨ Créer un mot de passe admin (protéger les réglages)");
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::TextEdit::singleline(&mut self.new_admin)
@@ -656,7 +684,7 @@ impl DfwApp {
                             .hint_text("Mot de passe admin")
                             .desired_width(220.0),
                     );
-                    let eye = if self.show_new_admin { "🙈" } else { "👁" };
+                    let eye = if self.show_new_admin { "Masquer" } else { "Afficher" };
                     if ui.button(eye).on_hover_text(if self.show_new_admin { "Masquer" } else { "Afficher" }).clicked() {
                         self.show_new_admin = !self.show_new_admin;
                     }
@@ -736,27 +764,27 @@ le mot de passe admin."
                 }
             }
             ui.label(egui::RichText::new(
-                "ℹ️ Le certificat est auto-signé : le navigateur affichera un avertissement, cliquez « Avancé » puis « Accepter et continuer ». \
+                "Le certificat est auto-signé : le navigateur affichera un avertissement, cliquez « Avancé » puis « Accepter et continuer ». \
 Le port doit être autorisé dans le pare-feu Windows (Windows le demande au premier lancement).",
             ).small());
         } else {
-            ui.label("🔒 Déverrouillez le journal pour générer le token d'accès.");
+            ui.label("■ Déverrouillez le journal pour générer le token d'accès.");
         }
 
         // ---- Outil de diagnostic réseau : journal des requêtes DNS (Wireshark simplifié) ----
         ui.add_space(14.0);
-        ui.heading("🔍 Journal DNS (diagnostic)");
+        ui.heading("☵ Journal DNS (diagnostic)");
         ui.add_space(2.0);
         let (listening, error) = {
             let st = self.shared.status.lock().unwrap();
             (st.dns_listening, st.dns_error.clone())
         };
         let label: String = if listening {
-            "✅ Requêtes DNS capturées en temps réel (outil type Wireshark — protocole DNS uniquement).".to_string()
+            "✓ Requêtes DNS capturées en temps réel (écoute sur 127.0.0.1:53).".to_string()
         } else if let Some(e) = error.as_ref() {
-            format!("⛔ Journal DNS indisponible : {e}")
+            format!("✕ Journal DNS indisponible : {e}")
         } else {
-            "ⓘ Journal DNS inactif.".to_string()
+            "… Journal DNS inactif.".to_string()
         };
         ui.label(&label);
         let mut dns_on = self.shared.config.lock().unwrap().dns_log;
@@ -766,7 +794,7 @@ Le port doit être autorisé dans le pare-feu Windows (Windows le demande au pre
         ui.add_space(4.0);
         let queries: Vec<crate::model::DnsQuery> = self.shared.dns_queries.lock().unwrap().clone();
         if queries.is_empty() {
-            ui.label(egui::RichText::new("Aucune requête DNS pour le moment.").weak());
+            ui.label(egui::RichText::new("Aucune requête DNS pour le moment. Activez le journal ci-dessus et configurez le DNS sur 127.0.0.1.").weak());
         } else {
             egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
                 for q in queries.iter().rev().take(30) {
@@ -777,7 +805,7 @@ Le port doit être autorisé dans le pare-feu Windows (Windows le demande au pre
     }
 
     fn draw_help(&mut self, ui: &mut egui::Ui) {
-        ui.heading("❓ À propos");
+        ui.heading("? À propos");
         ui.add_space(4.0);
         ui.label(egui::RichText::new(
             "DFWLogger est un superviseur familial transparent. Il est visible dans la barre des tâches, \
@@ -803,23 +831,21 @@ le consentement des enfants."
     }
 
     fn draw_big_brother(&mut self, ui: &mut egui::Ui) {
-        self.refresh_modes();
-        let tier = crate::big_brother::PrivilegeTier::current();
+        let tier = self.current_tier();
 
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("🛡️ Les 3 Modes d'Accès & de Protection");
-                ui.add_space(8.0);
-                ui.colored_label(
-                    match tier {
-                        crate::big_brother::PrivilegeTier::Standard => egui::Color32::from_rgb(0x6f, 0xd6, 0x9e),
-                        crate::big_brother::PrivilegeTier::Admin => egui::Color32::from_rgb(0x88, 0xAA, 0xFF),
-                        crate::big_brother::PrivilegeTier::Kernel => egui::Color32::from_rgb(0xFF, 0xCC, 0x00),
-                    },
-                    format!("Actif : {}", tier.badge()),
-                );
-            });
-            ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.heading("⛊ Les 3 Modes d'Accès & de Protection");
+            ui.add_space(8.0);
+            ui.colored_label(
+                match tier {
+                    crate::big_brother::PrivilegeTier::Standard => egui::Color32::from_rgb(0x6f, 0xd6, 0x9e),
+                    crate::big_brother::PrivilegeTier::Admin => egui::Color32::from_rgb(0x88, 0xAA, 0xFF),
+                    crate::big_brother::PrivilegeTier::Kernel => egui::Color32::from_rgb(0xFF, 0xCC, 0x00),
+                },
+                format!("Actif : {}", tier.badge()),
+            );
+        });
+        ui.add_space(4.0);
             ui.label(egui::RichText::new(tier.description()).weak());
             ui.add_space(8.0);
 
@@ -836,7 +862,7 @@ le consentement des enfants."
                     .inner_margin(egui::Margin::same(12.0));
                 f1.show(ui, |ui| {
                     ui.set_width(card_w);
-                    ui.strong("⚪ 1. Sans autorisation");
+                    ui.strong("○ 1. Sans autorisation");
                     ui.label(egui::RichText::new("(Mode Standard)").small().weak());
                     ui.add_space(4.0);
                     if tier == crate::big_brother::PrivilegeTier::Standard {
@@ -848,14 +874,14 @@ le consentement des enfants."
                     ui.label(egui::RichText::new("• Démarrage sans élévation\n• Surveillance locale transparente\n• Journal chiffré AES-256-GCM\n• Aucune altération système").small());
                     ui.add_space(8.0);
                     if tier == crate::big_brother::PrivilegeTier::Standard {
-                        let btn = egui::Button::new("🛡️ Passer en Accès Admin")
+                        let btn = egui::Button::new("↑ Passer en Accès Admin")
                             .fill(egui::Color32::from_rgb(0x1D, 0x4E, 0xD8))
                             .rounding(egui::Rounding::same(6.0));
                         if ui.add(btn).clicked() {
                             self.promote_to_admin();
                         }
                     } else {
-                        if ui.button("↩️ Revenir en Standard").clicked() {
+                        if ui.button("↩ Revenir en Standard").clicked() {
                             self.demote_to_standard();
                         }
                     }
@@ -869,7 +895,7 @@ le consentement des enfants."
                     .inner_margin(egui::Margin::same(12.0));
                 f2.show(ui, |ui| {
                     ui.set_width(card_w);
-                    ui.strong("🛡️ 2. Accès Admin");
+                    ui.strong("● 2. Accès Admin");
                     ui.label(egui::RichText::new("(Big Brother SYSTEM)").small().weak());
                     ui.add_space(4.0);
                     match self.big_brother_status.as_deref() {
@@ -877,14 +903,14 @@ le consentement des enfants."
                             if tier == crate::big_brother::PrivilegeTier::Admin {
                                 ui.colored_label(egui::Color32::from_rgb(0x3B, 0x82, 0xF6), "● ACTIF (SYSTEM)");
                             } else {
-                                ui.colored_label(egui::Color32::from_rgb(0x10, 0xB9, 0x81), "🟢 SERVICE PRÊT");
+                                ui.colored_label(egui::Color32::from_rgb(0x10, 0xB9, 0x81), "● SERVICE PRÊT");
                             }
                         }
                         Some("STOPPED") => {
-                            ui.colored_label(egui::Color32::from_rgb(0xE5, 0xA0, 0x5C), "🟠 ARRÊTÉ");
+                            ui.colored_label(egui::Color32::from_rgb(0xE5, 0xA0, 0x5C), "○ ARRÊTÉ");
                         }
                         _ => {
-                            ui.label(egui::RichText::new("⚪ Non installé").weak());
+                            ui.label(egui::RichText::new("○ Non installé").weak());
                         }
                     }
                     ui.add_space(4.0);
@@ -892,7 +918,7 @@ le consentement des enfants."
                     ui.add_space(8.0);
                     match tier {
                         crate::big_brother::PrivilegeTier::Standard => {
-                            let btn = egui::Button::new("🛡️ Activer le Mode Admin")
+                            let btn = egui::Button::new("↑ Activer le Mode Admin")
                                 .fill(egui::Color32::from_rgb(0x1D, 0x4E, 0xD8))
                                 .rounding(egui::Rounding::same(6.0));
                             if ui.add(btn).clicked() {
@@ -901,19 +927,19 @@ le consentement des enfants."
                         }
                         crate::big_brother::PrivilegeTier::Admin => {
                             ui.horizontal(|ui| {
-                                let btn_k = egui::Button::new("⚡ Passer en Noyau")
+                                let btn_k = egui::Button::new("✦ Passer en Noyau")
                                     .fill(egui::Color32::from_rgb(0xD9, 0x77, 0x06))
                                     .rounding(egui::Rounding::same(6.0));
                                 if ui.add(btn_k).clicked() {
                                     self.promote_to_kernel();
                                 }
-                                if ui.button("⏹ Désactiver").clicked() {
+                                if ui.button("■ Désactiver").clicked() {
                                     self.demote_to_standard();
                                 }
                             });
                         }
                         crate::big_brother::PrivilegeTier::Kernel => {
-                            if ui.button("↩️ Rétrograder en Admin").clicked() {
+                            if ui.button("↩ Rétrograder en Admin").clicked() {
                                 self.demote_to_admin();
                             }
                         }
@@ -928,7 +954,7 @@ le consentement des enfants."
                     .inner_margin(egui::Margin::same(12.0));
                 f3.show(ui, |ui| {
                     ui.set_width(card_w);
-                    ui.strong("⚡ 3. Accès Noyau");
+                    ui.strong("✦ 3. Accès Noyau");
                     ui.label(egui::RichText::new("(Serbert Ring 0 Driver)").small().weak());
                     ui.add_space(4.0);
                     if self.serbert_driver_running {
@@ -940,11 +966,11 @@ le consentement des enfants."
                     ui.label(egui::RichText::new("• Pilote \\Device\\Serbert\n• PsSetCreateProcessNotifyRoutineEx\n• Blocage STATUS_ACCESS_DENIED\n• 0 cycle CPU en userland\n• Protection anti-kill matérielle").small());
                     ui.add_space(8.0);
                     if self.serbert_driver_running {
-                        if ui.button("↩️ Rétrograder en Admin").clicked() {
+                        if ui.button("↩ Rétrograder en Admin").clicked() {
                             self.demote_to_admin();
                         }
                     } else {
-                        let btn = egui::Button::new("⚡ Activer l'Accès Noyau")
+                        let btn = egui::Button::new("✦ Activer l'Accès Noyau")
                             .fill(egui::Color32::from_rgb(0xD9, 0x77, 0x06))
                             .rounding(egui::Rounding::same(6.0));
                         if ui.add(btn).clicked() {
@@ -959,7 +985,7 @@ le consentement des enfants."
 
             // Note d'intégrité & modèle de sécurité
             ui.group(|ui| {
-                ui.label(egui::RichText::new("ℹ️ Modèle de sécurité & Règles du parc :").strong());
+                ui.label(egui::RichText::new("Modèle de sécurité & Règles du parc :").strong());
                 ui.label(egui::RichText::new(
                     "• Condition d'inviolabilité : Les comptes élèves ne doivent pas être administrateurs locaux.\n\
 • Dossier ProgramData\\DFWLogger verrouillé par ACL NTFS (SYSTEM et Administrateurs en contrôle total, élèves en lecture seule).\n\
@@ -971,7 +997,7 @@ le consentement des enfants."
 
             if let Some(ks) = self.serbert_status {
                 ui.group(|ui| {
-                    ui.strong("📊 Statistiques en direct du Pilote Noyau Serbert :");
+                    ui.strong("≡ Statistiques en direct du Pilote Noyau Serbert :");
                     ui.label(format!("• Version du pilote : {}", ks.version));
                     ui.label(format!("• Règles d'interdiction actives au Ring 0 : {}", ks.active_rules_count));
                     ui.label(format!("• Exécutions physiquement bloquées au niveau noyau : {}", ks.blocked_executions_count));
@@ -983,11 +1009,11 @@ le consentement des enfants."
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.strong("Actions de contrôle rapide :");
-                    if ui.button("🔄 Forcer l'application (tick)").clicked() {
+                    if ui.button("↻ Forcer l'application (tick)").clicked() {
                         crate::big_brother::tick();
                         self.info = Some("Politique Big Brother appliquée immédiatement.".into());
                     }
-                    if ui.button("📋 Recharger l'état").clicked() {
+                    if ui.button("≡ Recharger l'état").clicked() {
                         self.refresh_modes();
                     }
                 });
@@ -997,17 +1023,17 @@ le consentement des enfants."
 
             // 3. Interrupteurs généraux
             ui.group(|ui| {
-                ui.checkbox(&mut self.big_brother_cfg.enabled, "⚡ Activer les restrictions actives (Big Brother & Serbert)");
-                ui.checkbox(&mut self.big_brother_cfg.enable_kernel_driver, "🛡️ Coopération active avec le pilote noyau Serbert");
+                ui.checkbox(&mut self.big_brother_cfg.enabled, "✦ Activer les restrictions actives (Big Brother & Serbert)");
+                ui.checkbox(&mut self.big_brother_cfg.enable_kernel_driver, "⛨ Coopération active avec le pilote noyau Serbert");
                 if !self.big_brother_cfg.enabled {
-                    ui.label(egui::RichText::new("⚠️ Les protections sont désactivées dans big_brother.json (mode inactif / fail-open).").weak());
+                    ui.label(egui::RichText::new("! Les protections sont désactivées dans big_brother.json (mode inactif / fail-open).").weak());
                 }
             });
 
             ui.add_space(8.0);
 
             // 4. Filtrage Web (hosts & DNS)
-            ui.collapsing("🌐 Filtrage Web (Domaines bloqués & DNS filtré)", |ui| {
+            ui.collapsing("✦ Filtrage Web (Domaines bloqués & DNS filtré)", |ui| {
                 ui.label(egui::RichText::new("Redirection 0.0.0.0 via le fichier hosts Windows et/ou DNS imposé au niveau des interfaces réseau.").small());
                 ui.add_space(4.0);
 
@@ -1093,6 +1119,9 @@ le consentement des enfants."
                     if ui.selectable_label(self.big_brother_cfg.dns_filter.is_none(), "Défaut / DHCP").clicked() {
                         self.big_brother_cfg.dns_filter = None;
                     }
+                    if ui.selectable_label(self.big_brother_cfg.dns_filter.as_deref() == Some("127.0.0.1"), "Intercepteur Local (127.0.0.1)").clicked() {
+                        self.big_brother_cfg.dns_filter = Some("127.0.0.1".to_string());
+                    }
                     if ui.selectable_label(self.big_brother_cfg.dns_filter.as_deref() == Some("1.1.1.3"), "Cloudflare Family (1.1.1.3)").clicked() {
                         self.big_brother_cfg.dns_filter = Some("1.1.1.3".to_string());
                     }
@@ -1118,7 +1147,7 @@ le consentement des enfants."
             ui.add_space(8.0);
 
             // 5. Blocage d'Applications (Serbert Ring 0 & Watchdog Ring 3)
-            ui.collapsing("🛑 Applications & Processus interdits (Serbert Ring 0 & Watchdog)", |ui| {
+            ui.collapsing("⚙ Applications & Processus interdits (Serbert Ring 0 & Watchdog)", |ui| {
                 ui.label(egui::RichText::new("Interception immédiate avant exécution (Serbert Ring 0) + surveillance continue (Watchdog SYSTEM).").small());
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
@@ -1188,7 +1217,7 @@ le consentement des enfants."
             ui.add_space(8.0);
 
             // 6. Blocage des installations et exécutions (MSI & SRP)
-            ui.collapsing("🔒 Restrictions d'installations & SRP (DisableMSI & Chemins)", |ui| {
+            ui.collapsing("■ Restrictions d'installations & SRP (DisableMSI & Chemins)", |ui| {
                 let msi_active = crate::big_brother::msi_policy_active();
                 ui.checkbox(
                     &mut self.big_brother_cfg.block_msi,
@@ -1243,7 +1272,7 @@ le consentement des enfants."
             ui.add_space(8.0);
 
             // 7. Quota Quotidien & Plages Horaires
-            ui.collapsing("⏱️ Temps d'écran & Plages horaires autorisées", |ui| {
+            ui.collapsing("◷ Temps d'écran & Plages horaires autorisées", |ui| {
                 ui.label(egui::RichText::new("Lorsque le quota est atteint ou hors de la plage autorisée, la session console active est automatiquement déconnectée (verrouillée).").small());
                 ui.add_space(6.0);
 
@@ -1270,11 +1299,11 @@ le consentement des enfants."
 
                 if self.big_brother_state.quota_lock {
                     if let Some(r) = &self.big_brother_state.quota_reason {
-                        ui.colored_label(egui::Color32::from_rgb(0xE5, 0x5C, 0x5C), format!("🔒 Restriction actuellement active : {r}"));
+                        ui.colored_label(egui::Color32::from_rgb(0xE5, 0x5C, 0x5C), format!("■ Restriction actuellement active : {r}"));
                     }
                 }
 
-                if ui.button("🔄 Remettre à zéro le compteur d'aujourd'hui").clicked() {
+                if ui.button("↻ Remettre à zéro le compteur d'aujourd'hui").clicked() {
                     self.big_brother_state.reset_today();
                     self.info = Some("Compteur de session active du jour réinitialisé.".into());
                 }
@@ -1326,7 +1355,7 @@ le consentement des enfants."
                 }
 
                 let sync_btn = egui::Button::new(
-                    egui::RichText::new("🔄 Appliquer immédiatement (tick)")
+                    egui::RichText::new("↻ Appliquer immédiatement (tick)")
                         .strong(),
                 )
                 .min_size(egui::vec2(210.0, 38.0))
@@ -1338,7 +1367,7 @@ le consentement des enfants."
                     self.err = None;
                 }
 
-                let reload_btn = egui::Button::new("📋 Recharger l'état")
+                let reload_btn = egui::Button::new("≡ Recharger l'état")
                     .min_size(egui::vec2(140.0, 38.0))
                     .rounding(egui::Rounding::same(8.0));
 
@@ -1349,7 +1378,6 @@ le consentement des enfants."
             });
 
             ui.add_space(14.0);
-        });
     }
 
     pub fn save_big_brother_policy(&mut self) {
@@ -1478,6 +1506,7 @@ le consentement des enfants."
         self.big_brother_state = crate::big_brother::BigBrotherState::load();
         self.serbert_status = crate::serbert::get_status();
         self.serbert_driver_running = crate::serbert::is_driver_running();
+        self.last_status_check = std::time::Instant::now();
     }
 }
 
@@ -1491,7 +1520,7 @@ fn show_message(app: &mut DfwApp, ui: &mut egui::Ui) {
 }
 
 fn indic(ok: bool, op: &str) -> String {
-    if ok { format!("✅ {op}") } else { format!("⏳ en attente de confirmation") }
+    if ok { format!("✓ {op}") } else { format!("… en attente de confirmation") }
 }
 
 /// Grille 7 jours × 24 heures d'usage ; cellules colorées selon l'intensité.
@@ -1563,7 +1592,7 @@ fn draw_update_section(
         let st = shared.status.lock().unwrap();
         (st.update_note.clone(), st.update_url.clone())
     };
-    ui.heading("🔄 Mise à jour");
+    ui.heading("↻ Mise à jour");
     ui.add_space(4.0);
     match note {
         Some(n) => {
@@ -1579,7 +1608,7 @@ fn draw_update_section(
             std::thread::spawn(move || crate::update::check_once(&sh));
         }
         if let Some(u) = url {
-            if ui.button("📥 Ouvrir la release…").clicked() {
+            if ui.button("↗ Ouvrir la release…").clicked() {
                 open_url(&u);
                 *info = Some(format!("Ouverture de {u}"));
                 *err = None;
@@ -1711,13 +1740,13 @@ impl eframe::App for DfwApp {
                 .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x22, 0x28, 0x38))))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading(egui::RichText::new("🛡️ DFWLogger").color(egui::Color32::from_rgb(0x5B, 0x9C, 0xFF)).strong());
+                    ui.heading(egui::RichText::new("⛨ DFWLogger").color(egui::Color32::from_rgb(0x5B, 0x9C, 0xFF)).strong());
                     ui.add_space(8.0);
                     let monitoring = self.shared.monitoring.load(Ordering::Relaxed);
                     let (chip_txt, chip_col) = if monitoring {
                         ("● SURVEILLANCE ACTIVE", egui::Color32::from_rgb(0x10, 0xB9, 0x81))
                     } else {
-                        ("🔒 JOURNAL VERROUILLÉ", egui::Color32::from_rgb(0xEF, 0x44, 0x44))
+                        ("■ JOURNAL VERROUILLÉ", egui::Color32::from_rgb(0xEF, 0x44, 0x44))
                     };
                     ui.label(egui::RichText::new(chip_txt).color(chip_col).small().strong());
 
@@ -1736,17 +1765,21 @@ impl eframe::App for DfwApp {
                             }
                         };
 
-                        nav_item(ui, Tab::Aide, "❓", "Aide");
-                        nav_item(ui, Tab::Acces, "📱", "Accès LAN");
-                        nav_item(ui, Tab::Reglages, "⚙️", "Réglages");
-                        nav_item(ui, Tab::BigBrother, "🛡️", "Modes & Règles");
-                        nav_item(ui, Tab::Evenements, "📋", "Journal");
-                        nav_item(ui, Tab::Statut, "📊", "Aperçu");
+                        nav_item(ui, Tab::Aide, "?", "Aide");
+                        nav_item(ui, Tab::Acces, "☵", "Accès LAN");
+                        nav_item(ui, Tab::Reglages, "⚙", "Réglages");
+                        nav_item(ui, Tab::BigBrother, "⛊", "Modes & Règles");
+                        nav_item(ui, Tab::Evenements, "≡", "Journal");
+                        nav_item(ui, Tab::Statut, "◆", "Aperçu");
                     });
                 });
             });
 
-        let current_tier = crate::big_brother::PrivilegeTier::current();
+        // Actualisation périodique légère (sans bloquer le thread graphique ni spawner de process par frame)
+        if self.last_status_check.elapsed() > Duration::from_secs(4) {
+            self.refresh_modes();
+        }
+        let current_tier = self.current_tier();
 
         egui::TopBottomPanel::top("mode_bar")
             .frame(egui::Frame::none()
@@ -1770,7 +1803,7 @@ impl eframe::App for DfwApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         match current_tier {
                             crate::big_brother::PrivilegeTier::Standard => {
-                                let btn = egui::Button::new(egui::RichText::new("🛡️ Élever en Accès Admin").color(egui::Color32::WHITE).strong())
+                                let btn = egui::Button::new(egui::RichText::new("↑ Élever en Accès Admin").color(egui::Color32::WHITE).strong())
                                     .fill(egui::Color32::from_rgb(0x1D, 0x4E, 0xD8))
                                     .rounding(egui::Rounding::same(6.0));
                                 if ui.add(btn).clicked() {
@@ -1778,18 +1811,18 @@ impl eframe::App for DfwApp {
                                 }
                             }
                             crate::big_brother::PrivilegeTier::Admin => {
-                                let btn_k = egui::Button::new(egui::RichText::new("⚡ Activer le Mode Noyau").color(egui::Color32::WHITE).strong())
+                                let btn_k = egui::Button::new(egui::RichText::new("✦ Activer le Mode Noyau").color(egui::Color32::WHITE).strong())
                                     .fill(egui::Color32::from_rgb(0xD9, 0x77, 0x06))
                                     .rounding(egui::Rounding::same(6.0));
                                 if ui.add(btn_k).clicked() {
                                     self.promote_to_kernel();
                                 }
-                                if ui.button("↩️ Revenir sans élévation").clicked() {
+                                if ui.button("↩ Revenir sans élévation").clicked() {
                                     self.demote_to_standard();
                                 }
                             }
                             crate::big_brother::PrivilegeTier::Kernel => {
-                                if ui.button("↩️ Rétrograder en Accès Admin").clicked() {
+                                if ui.button("↩ Rétrograder en Accès Admin").clicked() {
                                     self.demote_to_admin();
                                 }
                             }
@@ -1805,18 +1838,22 @@ impl eframe::App for DfwApp {
                 self.draw_unlock_screen(ui, fresh);
                 return;
             }
-            match self.tab {
-                Tab::Statut => self.draw_status(ui),
-                Tab::Evenements => self.draw_events(ui),
-                Tab::Reglages => self.draw_settings(ui),
-                Tab::BigBrother => self.draw_big_brother(ui),
-                Tab::Acces => self.draw_access(ui),
-                Tab::Aide => self.draw_help(ui),
-            }
-            ui.add_space(8.0);
-            if self.info.is_some() || self.err.is_some() {
-                show_message(self, ui);
-            }
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    match self.tab {
+                        Tab::Statut => self.draw_status(ui),
+                        Tab::Evenements => self.draw_events(ui),
+                        Tab::Reglages => self.draw_settings(ui),
+                        Tab::BigBrother => self.draw_big_brother(ui),
+                        Tab::Acces => self.draw_access(ui),
+                        Tab::Aide => self.draw_help(ui),
+                    }
+                    ui.add_space(8.0);
+                    if self.info.is_some() || self.err.is_some() {
+                        show_message(self, ui);
+                    }
+                });
         });
     }
 }

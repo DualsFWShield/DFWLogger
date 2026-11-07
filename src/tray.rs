@@ -53,13 +53,61 @@ fn render_svg_rgba(svg: &str, size: u32) -> Option<Vec<u8>> {
     Some(rgba)
 }
 
-/// Icône DFWLogger actuelle (SVG « bouclier + œil »), rendue en RGBA brut 32×32.
+/// Icône DFWLogger actuelle (SVG « bouclier + œil »), rendue en RGBA brut 64×64.
 pub fn ico_rgba() -> (Vec<u8>, u32, u32) {
-    const SIZE: u32 = 32;
+    const SIZE: u32 = 64;
     match render_svg_rgba(ICON_SVG, SIZE) {
         Some(rgba) if rgba.len() == (SIZE * SIZE * 4) as usize => (rgba, SIZE, SIZE),
         _ => (vec![79, 140, 255, 255].repeat((SIZE * SIZE) as usize), SIZE, SIZE),
     }
+}
+
+/// Génère un fichier .ico complet (multi-résolution 256, 128, 64, 48, 32, 16 px, PNG embarqué)
+/// directement à partir de la source vectorielle SVG.
+#[allow(dead_code)]
+pub fn generate_ico_bytes() -> Option<Vec<u8>> {
+    use resvg::tiny_skia;
+    use resvg::usvg;
+    let opt = usvg::Options::default();
+    let tree = usvg::Tree::from_data(ICON_SVG.as_bytes(), &opt).ok()?;
+
+    let sizes: &[u32] = &[256, 128, 64, 48, 32, 16];
+    let mut png_images: Vec<(u32, Vec<u8>)> = Vec::new();
+
+    for &size in sizes {
+        let scale = size as f32 / tree.size().width();
+        let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+        resvg::render(&tree, tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
+        let png = pixmap.encode_png().ok()?;
+        png_images.push((size, png));
+    }
+
+    let n = png_images.len() as u16;
+    let mut out: Vec<u8> = Vec::new();
+    out.extend_from_slice(&0u16.to_le_bytes()); // réservé
+    out.extend_from_slice(&1u16.to_le_bytes()); // type icône (1)
+    out.extend_from_slice(&n.to_le_bytes());
+
+    let mut offset: u32 = 6 + 16 * n as u32;
+    for (size, png) in &png_images {
+        let b_w = if *size >= 256 { 0u8 } else { *size as u8 };
+        let b_h = if *size >= 256 { 0u8 } else { *size as u8 };
+        out.push(b_w);
+        out.push(b_h);
+        out.push(0); // palette
+        out.push(0); // réservé
+        out.extend_from_slice(&1u16.to_le_bytes()); // plans
+        out.extend_from_slice(&32u16.to_le_bytes()); // bpp
+        out.extend_from_slice(&(png.len() as u32).to_le_bytes());
+        out.extend_from_slice(&offset.to_le_bytes());
+        offset += png.len() as u32;
+    }
+
+    for (_, png) in png_images {
+        out.extend_from_slice(&png);
+    }
+
+    Some(out)
 }
 
 pub fn spawn_tray(shared: Arc<Shared>, ctx: Context) {
@@ -126,6 +174,7 @@ fn tray_loop(shared: Arc<Shared>, ctx: Context) {
             match ev {
                 TrayIconEvent::Click { .. } | TrayIconEvent::DoubleClick { .. } => {
                     shared.show_request.store(true, Ordering::Relaxed);
+                    crate::win::show_main_window();
                     dirty = true;
                 }
                 _ => {}
@@ -134,6 +183,7 @@ fn tray_loop(shared: Arc<Shared>, ctx: Context) {
         while let Ok(ev) = MenuEvent::receiver().try_recv() {
             if ev.id == m_show.id() {
                 shared.show_request.store(true, Ordering::Relaxed);
+                crate::win::show_main_window();
                 dirty = true;
             } else if ev.id == m_quit.id() {
                 std::process::exit(0);
@@ -142,7 +192,7 @@ fn tray_loop(shared: Arc<Shared>, ctx: Context) {
         if dirty {
             ctx.request_repaint();
         }
-        std::thread::sleep(std::time::Duration::from_millis(120));
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
 
@@ -153,10 +203,18 @@ mod tests {
     #[test]
     fn test_svg_rendering_output() {
         let (rgba, w, h) = ico_rgba();
-        assert_eq!(w, 32);
-        assert_eq!(h, 32);
-        assert_eq!(rgba.len(), (32 * 32 * 4) as usize);
+        assert_eq!(w, 64);
+        assert_eq!(h, 64);
+        assert_eq!(rgba.len(), (64 * 64 * 4) as usize);
         let has_visible_pixels = rgba.chunks_exact(4).any(|p| p[3] > 0);
         assert!(has_visible_pixels, "L'icône SVG rendue doit contenir des pixels visibles");
+    }
+
+    #[test]
+    fn test_generate_ico_file() {
+        let ico_bytes = generate_ico_bytes().expect("Génération du fichier ICO depuis le SVG");
+        assert!(ico_bytes.len() > 1000);
+        // Sauvegarde de l'icône dans la racine pour l'embarquement PE (build.rs)
+        let _ = std::fs::write("icon.ico", &ico_bytes);
     }
 }

@@ -218,9 +218,9 @@ impl PrivilegeTier {
 
     pub fn badge(&self) -> &'static str {
         match self {
-            PrivilegeTier::Standard => "⚪ Standard",
-            PrivilegeTier::Admin => "🛡️ Admin",
-            PrivilegeTier::Kernel => "⚡ Noyau",
+            PrivilegeTier::Standard => "○ Standard",
+            PrivilegeTier::Admin => "● Admin",
+            PrivilegeTier::Kernel => "✦ Noyau",
         }
     }
 

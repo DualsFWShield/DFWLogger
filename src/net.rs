@@ -376,106 +376,102 @@ pub fn spawn_dns_logger(shared: Arc<Shared>) {
 
 /// Active / désactive le journal DNS (cocher de l'onglet Accès réseau).
 pub fn set_dns_logging(shared: &Arc<Shared>, on: bool) {
-    shared.config.lock().unwrap().dns_log = on;
-    if !on {
+    {
+        let mut cfg = shared.config.lock().unwrap();
+        cfg.dns_log = on;
+    }
+    if on {
+        shared.dns_stop.store(false, Ordering::Relaxed);
+        spawn_dns_logger(shared.clone());
+    } else {
         shared.dns_stop.store(true, Ordering::Relaxed);
     }
 }
 
 async fn run_dns_loop(shared: Arc<Shared>) {
-    loop {
-        if shared.dns_stop.load(Ordering::Relaxed) {
+    if shared.dns_stop.load(Ordering::Relaxed) {
+        return;
+    }
+    {
+        let cfg = shared.config.lock().unwrap();
+        if !cfg.dns_log {
             return;
         }
+    }
+    let listener = match tokio::net::UdpSocket::bind(("127.0.0.1", 53)).await {
+        Ok(s) => s,
+        Err(e) => {
+            let mut st = shared.status.lock().unwrap();
+            st.dns_listening = false;
+            st.dns_error = Some(format!("port 53 : {e} (droits admin requis ?)"));
+            return;
+        }
+    };
+    {
+        let mut st = shared.status.lock().unwrap();
+        st.dns_listening = true;
+        st.dns_error = None;
+    }
+    let mut buf = vec![0u8; 1500];
+    while !shared.dns_stop.load(Ordering::Relaxed) {
         {
             let cfg = shared.config.lock().unwrap();
             if !cfg.dns_log {
-                return;
-            }
-        }
-        let mut listener = match tokio::net::UdpSocket::bind(("127.0.0.1", 53)).await {
-            Ok(s) => s,
-            Err(e) => {
-                let mut st = shared.status.lock().unwrap();
-                st.dns_listening = false;
-                st.dns_error = Some(format!("port 53 : {e} (droits admin requis ?)"));
-                return;
-            }
-        };
-        {
-            let mut st = shared.status.lock().unwrap();
-            st.dns_listening = true;
-            st.dns_error = None;
-        }
-        eprintln!("journal DNS : ecoute sur 127.0.0.1:53");
-        let mut buf = vec![0u8; 512];
-        loop {
-            let (n, peer) = match tokio::time::timeout(
-                std::time::Duration::from_secs(3),
-                listener.recv_from(&mut buf),
-            )
-            .await
-            {
-                Ok(Ok(x)) => x,
-                Ok(Err(_)) => continue,
-                Err(_) => continue,
-            };
-            let _ = handle_dns(&shared, &mut listener, &mut buf, n, peer).await;
-            if shared.dns_stop.load(Ordering::Relaxed) {
                 break;
             }
-            {
-                let cfg = shared.config.lock().unwrap();
-                if !cfg.dns_log {
-                    break;
-                }
-            }
         }
-        break;
+        let (n, peer) = match tokio::time::timeout(
+            std::time::Duration::from_millis(1000),
+            listener.recv_from(&mut buf),
+        )
+        .await
+        {
+            Ok(Ok(x)) => x,
+            _ => continue,
+        };
+        handle_dns(&shared, &listener, &buf[..n], peer).await;
     }
+    let mut st = shared.status.lock().unwrap();
+    st.dns_listening = false;
 }
 
-/// Intercepte une requête DNS, la transmet au résolveur, puis renvoie la réponse.
+/// Intercepte une requête DNS, la journalise immédiatement, la transmet au résolveur amont,
+/// puis renvoie la réponse exacte au client.
 async fn handle_dns(
     shared: &Arc<Shared>,
-    listener: &mut tokio::net::UdpSocket,
-    buf: &mut [u8],
-    n: usize,
+    listener: &tokio::net::UdpSocket,
+    msg: &[u8],
     peer: std::net::SocketAddr,
 ) {
-    let msg = buf[..n].to_vec();
-    let Some((id, name, qtype)) = parse_dns_query(&msg) else {
+    let Some((id, name, qtype)) = parse_dns_query(msg) else {
         return;
     };
-    let state = crate::big_brother::BigBrotherState::load();
-    let (host, port) = upstream_addr(&state);
-    let up = match tokio::net::UdpSocket::bind(("127.0.0.1", 0)).await {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    if up
-        .connect((host.as_str(), port))
-        .await
-        .is_err()
-    {
-        return;
-    }
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), up.send(&msg)).await;
-    let mut out = vec![0u8; 512];
-    let ok = tokio::time::timeout(std::time::Duration::from_secs(3), up.recv(&mut out))
-        .await
-        .map(|r| r.is_ok())
-        .unwrap_or(false);
-    if !ok {
-        return;
-    }
+
+    // Journalisation immédiate dès la réception de la requête
     shared.push_dns_query(crate::model::DnsQuery {
         id,
         ts: chrono::Utc::now().to_rfc3339(),
         name,
         qtype,
     });
-    let _ = listener.send_to(&out[..], &peer).await;
+
+    let state = crate::big_brother::BigBrotherState::load();
+    let (host, port) = upstream_addr(&state);
+    let Ok(up) = tokio::net::UdpSocket::bind(("0.0.0.0", 0)).await else {
+        return;
+    };
+    if up.connect((host.as_str(), port)).await.is_err() {
+        return;
+    }
+    if tokio::time::timeout(std::time::Duration::from_secs(3), up.send(msg)).await.is_err() {
+        return;
+    }
+    let mut out = vec![0u8; 1500];
+    if let Ok(Ok(recv_len)) = tokio::time::timeout(std::time::Duration::from_secs(3), up.recv(&mut out)).await {
+        if recv_len > 0 {
+            let _ = listener.send_to(&out[..recv_len], peer).await;
+        }
+    }
 }
 
 /// Décode une requête DNS : (id, nom interrogé, type) — labels avec pointeur compression supportés.

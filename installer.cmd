@@ -13,9 +13,10 @@ setlocal EnableDelayedExpansion
 if /i "%1"=="--elevated" goto :install_bb
 
 set "EXE=%~dp0dfwlogger.exe"
+if not exist "%EXE%" if exist "%~dp0target\release\dfwlogger.exe" set "EXE=%~dp0target\release\dfwlogger.exe"
 set "README=%~dp0README.md"
 if not exist "%EXE%" (
-    echo [ERREUR] dfwlogger.exe introuvable a cote de ce script ^(extrayez d'abord le zip^).
+    echo [ERREUR] dfwlogger.exe introuvable (compilez avec cargo build --release ou extrayez l'archive).
     pause
     exit /b 1
 )
