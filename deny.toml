@@ -12,8 +12,9 @@ unmaintained = "none"
 ignore = [
     # RUSTSEC-2026-0257 : Spécifique à Unix (webbrowser/src/unix.rs) ; DFWLogger tourne uniquement sous Windows.
     "RUSTSEC-2026-0257",
-    # RUSTSEC-2026-0194 : quick-xml (utilisé en local pour le parsing de l'event 4625 Windows)
+    # RUSTSEC-2026-0194, RUSTSEC-2026-0195 : quick-xml (utilisé en local pour le parsing de l'event 4625 Windows avec Reader standard, non NsReader)
     "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
     # rustls / rustls-webpki : DFWLogger n'utilise rustls qu'en serveur HTTPS LAN avec certificat auto-signé en mémoire.
     "RUSTSEC-2026-0346",
     "RUSTSEC-2026-0349",
