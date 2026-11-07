@@ -28,7 +28,7 @@ Tout est écrit, **chiffré**, dans `%LOCALAPPDATA%\DFWLogger\` :
 - Déverrouillage par mot de passe parent (première ouverture : création du mot de passe).
 - Bouton « Verrouiller le journal maintenant » : purge la clé mémoire + le blob DPAPI.
 
-## Tray, fenêtre et terminal
+## Tray, fenêtre et terminal (sans admin)
 
 - La croix ✕ de la fenêtre **masque dans la zone de notification** (icône bleu/œil) ; la
   surveillance continue. Clic sur l'icône : rouvrir. Menu tray : « Ouvrir » / « Quitter ».
@@ -42,23 +42,15 @@ Tout est écrit, **chiffré**, dans `%LOCALAPPDATA%\DFWLogger\` :
 ## Dashboard LAN (autre appareil)
 
 1. Déverrouillez le journal dans l'application ; l'onglet **Accès réseau** affiche
-   `https://<IP>:4782` et un **token** (renouvelé à chaque déverrouillage).
-2. Depuis un téléphone/navigation sur le même réseau : ouvrez l'URL (le certificat local
-   est auto-signé : « Avancé → Accepter et continuer »), le lien pré-rempli `?auth=<token>`
-   peut être copié en un clic.
-3. Le pré-écrivain HTTPS écoute sur un port visible documenté (défaut 4782), exige le token
+   `https://<IP>:4782` et un **token** (renouvelé à chaque déverrouillage), copiable en
+   un clic sous forme de lien `?auth=<token>`.
+2. Depuis un téléphone (ou tout appareil) sur le même réseau : ouvrez l'URL. Le certificat
+   local est auto-signé : « Avancé → Accepter et continuer ».
+3. Le serveur HTTPS écoute sur un port visible et documenté (défaut 4782), exige le token
    (comparaison à temps constant) et sert uniquement des APIs JSON en **lecture seule** :
-   événements récents, compteurs et **top 10 du temps passé par application**.
-   Le journal verrouillé répond « locked » : aucune donnée ne quitte l'app à froid.
+   événements récents, compteurs et **top 10 du temps passé par application**. Le journal
+   verrouillé répond « locked » : aucune donnée ne quitte l'app à froid.
 4. Le pare-feu Windows demande d'autoriser le port au premier lancement.
-
-## Terminal non-admin sur le PC surveillé
-
-```bat
-dfwlogger.exe tail 30
-dfwlogger.exe export historique.csv
-```
-demande le mot de passe parent et affiche / exporte l'historique déchiffré.
 
 ## Compilation
 
@@ -68,6 +60,26 @@ cargo build --release
 rem → target\release\dfwlogger.exe
 cargo test
 ```
+
+## GitHub : releases automatiques
+
+Le repo embarque une GitHub Action (`.github/workflows/build.yml`) :
+
+1. À chaque push sur `main` (et chaque push de tag `v*`) : `cargo test`, build release,
+   empaquetage `dfwlogger-<tag>-win64.zip` (exe + README).
+2. Publication automatique d'une **release versionnée** : tag `v<cargo-version>-b<build#>`
+   (ex. `v0.2.0-b12`) calculé depuis Cargo.toml + le numéro de run — un push = une nouvelle
+   release marquée latest. Les tags manuels `v*` publient sous leur propre nom.
+3. Le zip est aussi disponible comme artifact de run pour les pull requests.
+
+Pour publier la première version :
+
+```bat
+git remote add origin https://github.com/<vous>/DFWLogger.git
+git push -u origin main
+```
+et la release est publiée dans la foulée (onglet Releases). Bump de version : éditez
+`version = "x.y.z"` dans Cargo.toml puis poussez.
 
 ## Élévation optionnelle
 
