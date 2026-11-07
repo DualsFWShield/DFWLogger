@@ -22,14 +22,17 @@ pub struct DfwApp {
     tab: Tab,
     password: String,
     confirm: String,
+    show_password: bool,
     remember: bool,
     err: Option<String>,
     info: Option<String>,
     /// Mot de passe « admin » en cours de saisie (déverrouillage des réglages).
     admin_password: String,
+    show_admin_password: bool,
     /// Création du mot de passe admin : saisie + confirmation.
     new_admin: String,
     new_admin_confirm: String,
+    show_new_admin: bool,
     /// Réglages déverrouillés pour cette session (quand un mot de passe admin est défini).
     admin_unlocked: bool,
     /// Configuration & état de Big Brother (Mode École) et pilote noyau Serbert.
@@ -80,12 +83,15 @@ impl DfwApp {
             tab: Tab::Statut,
             password: String::new(),
             confirm: String::new(),
+            show_password: false,
             remember: true,
             err: None,
             info: None,
             admin_password: String::new(),
+            show_admin_password: false,
             new_admin: String::new(),
             new_admin_confirm: String::new(),
+            show_new_admin: false,
             admin_unlocked: false,
             big_brother_cfg,
             big_brother_state,
@@ -166,6 +172,7 @@ impl DfwApp {
     fn wipe_fields(&mut self) {
         self.password = String::new();
         self.confirm = String::new();
+        self.show_password = false;
         self.err = None;
     }
 
@@ -182,17 +189,28 @@ impl DfwApp {
                 ui.label("Entrez le mot de passe parent pour déverrouiller le journal.");
             }
             ui.add_space(18.0);
-            let pass_edit = egui::TextEdit::singleline(&mut self.password)
-                .password(true)
-                .hint_text("Mot de passe parent")
-                .desired_width(320.0);
-            ui.add(pass_edit);
+            ui.horizontal(|ui| {
+                ui.add_space((ui.available_width() - 340.0).max(0.0) / 2.0);
+                let pass_edit = egui::TextEdit::singleline(&mut self.password)
+                    .password(!self.show_password)
+                    .hint_text("Mot de passe parent")
+                    .desired_width(280.0);
+                ui.add(pass_edit);
+                let eye = if self.show_password { "🙈" } else { "👁" };
+                if ui.button(eye).on_hover_text(if self.show_password { "Masquer le mot de passe" } else { "Afficher le mot de passe" }).clicked() {
+                    self.show_password = !self.show_password;
+                }
+            });
             if fresh {
-                let confirm_edit = egui::TextEdit::singleline(&mut self.confirm)
-                    .password(true)
-                    .hint_text("Confirmation")
-                    .desired_width(320.0);
-                ui.add(confirm_edit);
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.add_space((ui.available_width() - 340.0).max(0.0) / 2.0);
+                    let confirm_edit = egui::TextEdit::singleline(&mut self.confirm)
+                        .password(!self.show_password)
+                        .hint_text("Confirmation")
+                        .desired_width(280.0);
+                    ui.add(confirm_edit);
+                });
             }
             ui.add_space(6.0);
             ui.checkbox(&mut self.remember, "Mémoriser (reprise auto après redémarrage, protégée par DPAPI)");
@@ -380,23 +398,30 @@ impl DfwApp {
             ui.group(|ui| {
                 ui.label("🔒 Réglages protégés par le mot de passe admin");
                 ui.add_space(4.0);
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.admin_password)
-                        .password(true)
-                        .hint_text("Mot de passe admin")
-                        .desired_width(260.0),
-                );
-                if ui.button("Déverrouiller les réglages").clicked() {
-                    let pass = std::mem::take(&mut self.admin_password);
-                    if verify_admin_phc(cfg.admin_phc.as_deref().unwrap_or(""), &pass) {
-                        self.admin_unlocked = true;
-                        self.info = Some("Réglages déverrouillés pour cette session.".into());
-                        self.err = None;
-                    } else {
-                        self.err = Some("Mot de passe admin incorrect.".into());
-                        self.info = None;
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.admin_password)
+                            .password(!self.show_admin_password)
+                            .hint_text("Mot de passe admin")
+                            .desired_width(220.0),
+                    );
+                    let eye = if self.show_admin_password { "🙈" } else { "👁" };
+                    if ui.button(eye).on_hover_text(if self.show_admin_password { "Masquer" } else { "Afficher" }).clicked() {
+                        self.show_admin_password = !self.show_admin_password;
                     }
-                }
+                    if ui.button("Déverrouiller les réglages").clicked() {
+                        let pass = std::mem::take(&mut self.admin_password);
+                        self.show_admin_password = false;
+                        if verify_admin_phc(cfg.admin_phc.as_deref().unwrap_or(""), &pass) {
+                            self.admin_unlocked = true;
+                            self.info = Some("Réglages déverrouillés pour cette session.".into());
+                            self.err = None;
+                        } else {
+                            self.err = Some("Mot de passe admin incorrect.".into());
+                            self.info = None;
+                        }
+                    }
+                });
             });
             show_message(self, ui);
             return;
@@ -590,18 +615,26 @@ impl DfwApp {
                 }
             } else {
                 ui.label("🔐 Créer un mot de passe admin (protéger les réglages)");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.new_admin)
-                        .password(true)
-                        .hint_text("Mot de passe admin")
-                        .desired_width(260.0),
-                );
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.new_admin_confirm)
-                        .password(true)
-                        .hint_text("Confirmation")
-                        .desired_width(260.0),
-                );
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.new_admin)
+                            .password(!self.show_new_admin)
+                            .hint_text("Mot de passe admin")
+                            .desired_width(220.0),
+                    );
+                    let eye = if self.show_new_admin { "🙈" } else { "👁" };
+                    if ui.button(eye).on_hover_text(if self.show_new_admin { "Masquer" } else { "Afficher" }).clicked() {
+                        self.show_new_admin = !self.show_new_admin;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.new_admin_confirm)
+                            .password(!self.show_new_admin)
+                            .hint_text("Confirmation")
+                            .desired_width(220.0),
+                    );
+                });
                 if ui.button("Activer la protection").clicked() {
                     let pass = std::mem::take(&mut self.new_admin);
                     let confirm = std::mem::take(&mut self.new_admin_confirm);
