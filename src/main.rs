@@ -293,14 +293,22 @@ est appliquée automatiquement toutes les 15 secondes.",
 
     collect::spawn_all(shared.clone());
     net::spawn_dashboard(shared.clone());
+    net::spawn_dns_logger(shared.clone());
     // Toasts : enregistrement du nom d'app (HKCU) + vérification de mise à jour.
     notify::ensure_aumid();
     update::start_checker(shared.clone());
 
+    let (rgba, icon_w, icon_h) = crate::tray::ico_rgba();
+    let icon = std::sync::Arc::new(eframe::egui::IconData {
+        rgba,
+        width: icon_w,
+        height: icon_h,
+    });
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("DFWLogger — Superviseur familial")
-            .with_inner_size([820.0, 680.0]),
+            .with_inner_size([820.0, 680.0])
+            .with_icon(icon),
         ..Default::default()
     };
     let _ = eframe::run_native(

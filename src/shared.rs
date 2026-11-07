@@ -5,6 +5,68 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use chrono::Utc;
+
+/// Durée de validité d'un code d'accès dashboard (secondes).
+pub const DASHBOARD_CODE_TTL_SECS: i64 = 600;
+
+/// Génère un token d'accès dashboard aléatoire (base64 URL-safe, 32 octets).
+pub fn generate_dashboard_token() -> String {
+    use rand::RngCore;
+    let mut b = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut b);
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
+}
+
+/// Génère un code d'accès dashboard à 6 caractères (majuscules/minuscules + chiffres,
+/// sans ambiguïtés) avec au moins une majuscule et une minuscule.
+pub fn generate_access_code() -> String {
+    use rand::Rng;
+    const CHARSET: &str = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    loop {
+        let mut s = String::with_capacity(6);
+        for _ in 0..6 {
+            let idx: usize = rand::thread_rng().gen_range(0..CHARSET.len());
+            s.push(CHARSET.chars().nth(idx).unwrap());
+        }
+        if s.chars().any(|c| c.is_ascii_uppercase())
+            && s.chars().any(|c| c.is_ascii_lowercase())
+            && s.chars().any(|c| c.is_ascii_digit())
+        {
+            return s;
+        }
+    }
+}
+
+/// Valide le format d'un code d'accès dashboard : 6 caractères alphanumériques
+/// incluant au moins une majuscule et une minuscule.
+pub fn valid_access_code(s: &str) -> bool {
+    if s.len() != 6 {
+        return false;
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let has_upper = chars.iter().any(|c| c.is_ascii_uppercase());
+    let has_lower = chars.iter().any(|c| c.is_ascii_lowercase());
+    let has_digit = chars.iter().any(|c| c.is_ascii_digit());
+    if !(has_upper && has_lower && has_digit) {
+        return false;
+    }
+    chars.iter().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// Comparaison à temps constant (moins de fuite par temporisation).
+pub fn const_time_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 #[derive(Default, Clone, Debug)]
 pub struct Status {
     pub elevated: bool,
@@ -15,6 +77,9 @@ pub struct Status {
     pub security_note: String,
     pub dashboard_listening: bool,
     pub dashboard_error: Option<String>,
+    /// État du journal DNS (outil type Wireshark — DNS uniquement).
+    pub dns_listening: bool,
+    pub dns_error: Option<String>,
     /// Note de vérification de mise à jour (résultat ou état du processus).
     pub update_note: Option<String>,
     /// URL de la release plus récente, cliquable depuis l'UI.
@@ -35,6 +100,14 @@ pub struct Shared {
     pub monitoring: AtomicBool,
     pub next_id: AtomicU64,
     pub dashboard_token: Mutex<Option<String>>,
+    /// Code d'accès dashboard à 6 caractères (lettres majuscules/minuscules) — valable ~10 min.
+    pub dashboard_code: Mutex<Option<String>>,
+    /// Timestamp d'expiration du code dashboard (secondes Unix ; 0 = expiré).
+    pub dashboard_code_exp: Mutex<i64>,
+    /// Journal des requêtes DNS interceptées (outil type Wireshark — DNS uniquement).
+    pub dns_queries: Mutex<Vec<crate::model::DnsQuery>>,
+    /// Signal d'arrêt du journal DNS (thread de tâche).
+    pub dns_stop: Arc<AtomicBool>,
     /// true = il y a de l'activité, l'UI re-dessine immédiatement.
     pub dirty: AtomicBool,
     /// true = l'utilisateur veut faire réapparaître la fenêtre (clic tray/menu).
@@ -57,9 +130,69 @@ impl Shared {
             monitoring: AtomicBool::new(false),
             next_id: AtomicU64::new(1),
             dashboard_token: Mutex::new(None),
+            dashboard_code: Mutex::new(None),
+            dashboard_code_exp: Mutex::new(0),
+            dns_queries: Mutex::new(Vec::new()),
+            dns_stop: Arc::new(AtomicBool::new(false)),
             dirty: AtomicBool::new(false),
             show_request: AtomicBool::new(false),
         })
+    }
+
+    /// Émet un nouveau couple token + code d'accès dashboard (après déverrouillage).
+    /// Le token est un secret aléatoire (base64) ; le code est une séquence de 6
+    /// caractères majuscules/minuscules, valable `DASHBOARD_CODE_TTL_SECS` secondes.
+    pub fn issue_dashboard_access(&self) {
+        let token = generate_dashboard_token();
+        let code = generate_access_code();
+        *self.dashboard_token.lock().unwrap() = Some(token.clone());
+        *self.dashboard_code.lock().unwrap() = Some(code.clone());
+        *self.dashboard_code_exp.lock().unwrap() = chrono::Utc::now().timestamp()
+            + DASHBOARD_CODE_TTL_SECS;
+        self.dirty.store(true, Ordering::Relaxed);
+    }
+
+    /// Vérifie un identifiant de dashboard parmi les 3 méthodes acceptées :
+    /// 1. le token actuel (renouvelé à chaque déverrouillage) ;
+    /// 2. le code à 6 caractères maj/min (valable ~10 min) ;
+    /// 3. le mot de passe admin (Argon2 PHC) — qui verrouille les paramètres.
+    pub fn verify_dashboard_credential(&self, given: &str) -> bool {
+        let now = chrono::Utc::now().timestamp();
+        if !given.is_empty() {
+            // 1) Token actuel
+            if let Some(t) = self.dashboard_token.lock().unwrap().as_ref() {
+                if !t.is_empty() && crate::shared::const_time_eq(t, given) {
+                    return true;
+                }
+            }
+            // 2) Code à 6 caractères maj/min non expiré
+            if let Some(code) = self.dashboard_code.lock().unwrap().as_ref() {
+                let exp = *self.dashboard_code_exp.lock().unwrap();
+                if !code.is_empty()
+                    && now <= exp
+                    && valid_access_code(code)
+                    && crate::shared::const_time_eq(code, given)
+                {
+                    return true;
+                }
+            }
+        }
+        // 3) Mot de passe admin (PHC Argon2 — distinct du mot de passe du journal).
+        if let Some(phc) = self.config.lock().unwrap().admin_phc.clone() {
+            return crate::ui::verify_admin_phc(&phc, given);
+        }
+        false
+    }
+
+    /// Ajoute une requête DNS à la mémoire (capped, FIFO).
+    pub fn push_dns_query(&self, q: crate::model::DnsQuery) {
+        let mut v = self.dns_queries.lock().unwrap();
+        v.push(q);
+        let mut excess = v.len().saturating_sub(500);
+        while excess > 0 {
+            v.remove(0);
+            excess -= 1;
+        }
     }
 
     /// Journalise un événement : chiffrement + mémoire. Ignoré si le journal est verrouillé.

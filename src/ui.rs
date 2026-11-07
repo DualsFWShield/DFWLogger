@@ -126,8 +126,7 @@ impl DfwApp {
         self.shared.import_from_store(2000);
         self.shared.monitoring.store(true, Ordering::Relaxed);
         self.shared.push(EventKind::Started);
-        let token = new_token();
-        *self.shared.dashboard_token.lock().unwrap() = Some(token);
+        self.shared.issue_dashboard_access();
         if !persist_dpapi {
             self.shared.store.lock().unwrap().forget_dpapi();
         }
@@ -671,27 +670,74 @@ le mot de passe admin."
         ui.heading("📡 Accès réseau");
         ui.add_space(4.0);
         let token = self.shared.dashboard_token.lock().unwrap().clone();
+        let code = self.shared.dashboard_code.lock().unwrap().clone();
         let port = self.shared.config.lock().unwrap().dashboard_port;
         let ip = crate::win::primary_lan_ip();
-        if let Some(tok) = token {
-            ui.label("Ouvrez depuis un autre appareil du même réseau :");
-            ui.add_space(4.0);
-            ui.monospace(egui::RichText::new(format!("https://{ip}:{port}")).text_style(egui::TextStyle::Heading));
-            ui.add_space(8.0);
-            ui.label("Token d'accès (renouvelé à chaque déverrouillage) :");
-            ui.monospace(egui::RichText::new(&tok).text_style(egui::TextStyle::Monospace));
+        if let Some(tok) = token.as_ref() {
+            // ---- QR code (généré en direct depuis la matrice du QR) ----
+            ui.add_space(6.0);
+            ui.label("QR code à scanner :");
+            let qr_size = 160.0;
+            draw_qr(ui, &format!("https://{ip}:{port}/?auth={tok}"), qr_size);
+            ui.add_space(10.0);
+
+            // ---- Token d'accès (renouvelé à chaque déverrouillage) ----
+            ui.label("Token d'accès :");
+            ui.monospace(egui::RichText::new(tok).text_style(egui::TextStyle::Monospace));
             if ui.button("Copier le lien complet").clicked() {
                 let link = format!("https://{ip}:{port}/?auth={tok}");
                 ui.ctx().copy_text(link);
                 self.info = Some("Lien copié dans le presse-papiers.".into());
             }
-            ui.add_space(10.0);
+
+            // ---- Code à 6 caractères maj/min (second moyen d'auth) ----
+            if let Some(code_val) = code.as_ref() {
+                ui.add_space(6.0);
+                ui.label("Code à 6 caractères (majuscules/minuscules) :");
+                ui.monospace(egui::RichText::new(code_val).text_style(egui::TextStyle::Monospace));
+                if ui.button("Copier le code").clicked() {
+                    ui.ctx().copy_text(code_val.clone());
+                    self.info = Some("Code copié dans le presse-papiers.".into());
+                }
+            }
             ui.label(egui::RichText::new(
                 "ℹ️ Le certificat est auto-signé : le navigateur affichera un avertissement, cliquez « Avancé » puis « Accepter et continuer ». \
 Le port doit être autorisé dans le pare-feu Windows (Windows le demande au premier lancement).",
             ).small());
         } else {
             ui.label("🔒 Déverrouillez le journal pour générer le token d'accès.");
+        }
+
+        // ---- Outil de diagnostic réseau : journal des requêtes DNS (Wireshark simplifié) ----
+        ui.add_space(14.0);
+        ui.heading("🔍 Journal DNS (diagnostic)");
+        ui.add_space(2.0);
+        let (listening, error) = {
+            let st = self.shared.status.lock().unwrap();
+            (st.dns_listening, st.dns_error.clone())
+        };
+        let label: String = if listening {
+            "✅ Requêtes DNS capturées en temps réel (outil type Wireshark — protocole DNS uniquement).".to_string()
+        } else if let Some(e) = error.as_ref() {
+            format!("⛔ Journal DNS indisponible : {e}")
+        } else {
+            "ⓘ Journal DNS inactif.".to_string()
+        };
+        ui.label(&label);
+        let mut dns_on = self.shared.config.lock().unwrap().dns_log;
+        if ui.checkbox(&mut dns_on, "Journaliser les requêtes DNS résolues").changed() {
+            crate::net::set_dns_logging(&self.shared, dns_on);
+        }
+        ui.add_space(4.0);
+        let queries: Vec<crate::model::DnsQuery> = self.shared.dns_queries.lock().unwrap().clone();
+        if queries.is_empty() {
+            ui.label(egui::RichText::new("Aucune requête DNS pour le moment.").weak());
+        } else {
+            egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                for q in queries.iter().rev().take(30) {
+                    ui.monospace(format!("{:<22} {:<8} {}", q.ts, q.qtype, q.name));
+                }
+            });
         }
     }
 
@@ -1410,6 +1456,36 @@ fn draw_update_section(
     });
 }
 
+/// Dessine un QR code dans l'UI à partir de la matrice interne du code (crate `qrcode`).
+fn draw_qr(ui: &mut egui::Ui, text: &str, max_size: f32) {
+    let code = match qrcode::QrCode::new(text) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let n = code.width() as f32;
+    let module = (max_size / (n + 8.0)).floor().max(2.0);
+    let quiet = module * 4.0;
+    let total = (n + quiet * 2.0) * module;
+    let (rect, _resp) = ui.allocate_exact_size(egui::vec2(total, total), egui::Sense::hover());
+    let painter = ui.painter();
+    let colors = code.to_colors();
+    let n_int = code.width() as usize;
+    for row in 0..n_int {
+        for col in 0..n_int {
+            let dark = colors[row * n_int + col] != qrcode::Color::Light;
+            if dark {
+                let x = rect.min.x + (col as f32 + quiet) * module;
+                let y = rect.min.y + (row as f32 + quiet) * module;
+                painter.rect_filled(
+                    egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(module, module)),
+                    0.0,
+                    egui::Color32::BLACK,
+                );
+            }
+        }
+    }
+}
+
 fn store_dir(shared: &Arc<Shared>) -> std::path::PathBuf {
     shared.store.lock().unwrap().dir.clone()
 }
@@ -1441,16 +1517,9 @@ fn export_csv(shared: &Arc<Shared>) -> Result<PathBuf, String> {
     std::fs::write(&path, csv).map_err(|e| format!("écriture CSV : {e}"))?;
     Ok(path)
 }
-fn new_token() -> String {
-    use rand::RngCore;
-    let mut b = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut b);
-    use base64::Engine;
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
-}
 
 /// Vérifie un mot de passe admin contre l'empreinte PHC enregistrée (Argon2id).
-fn verify_admin_phc(phc: &str, password: &str) -> bool {
+pub(crate) fn verify_admin_phc(phc: &str, password: &str) -> bool {
     use argon2::{Argon2, PasswordHash, PasswordVerifier};
     match PasswordHash::new(phc) {
         Ok(parsed) => Argon2::default()

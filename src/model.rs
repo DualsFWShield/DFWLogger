@@ -86,6 +86,17 @@ pub struct Event {
     pub kind: EventKind,
 }
 
+/// Une requête DNS interceptée par l'outil de diagnostic réseau (type Wireshark,
+/// DNS uniquement : aucun autre protocole n'est capturé).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct DnsQuery {
+    /// Identifiant de la requête DNS (u16, décodé).
+    pub id: u64,
+    pub ts: String,
+    pub name: String,
+    pub qtype: String,
+}
+
 /// Formate une durée en français : « 1 h 05 », « 4 min 12 s », « 45 s ».
 pub fn format_hms(secs: u64) -> String {
     if secs >= 3600 {

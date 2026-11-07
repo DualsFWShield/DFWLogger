@@ -185,6 +185,13 @@ Tout est écrit, **chiffré**, dans `%LOCALAPPDATA%\DFWLogger\` :
   de passe du journal ; activable dans Réglages.
 - **🧰 Installeur utilisateur** : `installer.cmd` copie l'exe dans
   `%LOCALAPPDATA%\Programs\DFWLogger` + raccourcis Bureau/menu Démarrer (sans élévation).
+- **📱 Dashboard LAN v2** : QR code (généré en UI via le crate `qrcode`), authentification
+  multi-méthodes (token + code 6 maj/min valable 10 min + mot de passe admin Argon2id), APIs
+  `/api/status`, `/api/config`, `/api/bigbrother`, `/api/dns`.
+- **🔍 Journal DNS** : outil de diagnostic réseau « type Wireshark » — proxy DNS local
+  (`127.0.0.1:53`), journalisation des requêtes DNS uniquement (aucun autre protocole capturé).
+- **🪟 Icône de fenêtre** : `eframe::NativeOptions` fixe désormais l'icône dérivée de l'icône
+  tray au lancement de la fenêtre (corrige l'affichage par défaut « egui »).
 
 ## Tray, fenêtre et terminal (sans admin)
 
@@ -200,15 +207,52 @@ Tout est écrit, **chiffré**, dans `%LOCALAPPDATA%\DFWLogger\` :
 ## Dashboard LAN (autre appareil)
 
 1. Déverrouillez le journal dans l'application ; l'onglet **Accès réseau** affiche
-   `https://<IP>:4782` et un **token** (renouvelé à chaque déverrouillage), copiable en
-   un clic sous forme de lien `?auth=<token>`.
-2. Depuis un téléphone (ou tout appareil) sur le même réseau : ouvrez l'URL. Le certificat
+   `https://<IP>:4782` et un **token** (renouvelé à chaque déverrouillage), avec **QR code**
+   à scanner, copiable en un clic sous forme de lien `?auth=<token>`.
+2. Depuis un téléphone (ou tout autre appareil) sur le même réseau : ouvrez l'URL. Le certificat
    local est auto-signé : « Avancé → Accepter et continuer ».
-3. Le serveur HTTPS écoute sur un port visible et documenté (défaut 4782), exige le token
-   (comparaison à temps constant) et sert uniquement des APIs JSON en **lecture seule** :
-   événements récents, compteurs et **top 10 du temps passé par application**. Le journal
-   verrouillé répond « locked » : aucune donnée ne quitte l'app à froid.
-4. Le pare-feu Windows demande d'autoriser le port au premier lancement.
+3. Le serveur HTTPS écoute sur un port visible et documenté (défaut 4782), lancé en thread
+   background (aucun terminal, aucun processus visible dédié) et sert uniquement des APIs JSON
+   en **lecture seule**.
+4. **Authentification multi-méthodes** (les trois valables, selon le cas) :
+   - **Token** : secret aléatoire (base64, 32 octets) régénéré à chaque déverrouillage — via QR
+     code ou lien `?auth=<token>`.
+   - **Code à 6 caractères** (`majuscules/minuscules/chiffres`, sans ambiguïté, ≥ 1 maj + 1 min) —
+     valable **10 minutes** (`DASHBOARD_CODE_TTL_SECS = 600 s`) ; généré à chaque déverrouillage.
+   - **Mot de passe admin** : le second mot de passe « admin » (Argon2id PHC) — qui, lui, verrouille
+     les paramètres du logiciel (Réglages → « Protection admin »).
+   Toutes les méthodes passent par une **comparaison à temps constant** (`const_time_eq`).
+5. Le serveur HTTPS exige une auth (401 sinon) et sert uniquement des APIs JSON en lecture seule :
+   événements récents, compteurs, **top 10 du temps passé par application**, heatmap et
+   **état complet Big Brother**. Le journal verrouillé répond « locked » : aucune donnée ne quitte
+   l'app à froid.
+6. Le pare-feu Windows demande d'autoriser le port au premier lancement.
+
+### APIs du serveur local
+
+| Endpoint | Contenu |
+|---|---|
+| `GET /api/status` | État complet : journal (locked/monitoring), dashboard, DNS, compteurs, politique Big Brother. |
+| `GET /api/config` | Paramètres (sans secrets : hash PHC admin exclu). |
+| `GET /api/bigbrother` | Politique Big Brother : domaines, processus bloqués, quotas, DNS filter, état noyau. |
+| `GET /api/dns` | Journal des requêtes DNS interceptées. |
+| `GET /api/events?after=<id>` | Événements récents (JSON) — « locked » si journal verrouillé. |
+
+## Outil de diagnostic réseau : journal DNS (type Wireshark — protocole DNS uniquement)
+
+L'onglet **Accès réseau** intègre un outil de diagnostic réseau « type Wireshark », mais **DNS
+uniquement** : aucun autre protocole n'est capturé.
+
+- Fonctionnement : proxy **UDP local sur `127.0.0.1:53`** (forwarding uniquement, aucune donnée
+  modifiée). Les requêtes DNS sont redirigées vers le résolveur configuré (backup Big Brother ou
+  DNS public par défaut), la réponse est relayée au client, puis la requête est journalisée
+  (id, horodatage, nom interrogé, type).
+- Activation : case à cocher **« Journaliser les requêtes DNS résolues »** dans l'onglet
+  **Accès réseau** (persisted dans les Réglages).
+- Consultation : liste temps réel des dernières requêtes (`/api/dns`, 30 dernières, mémoire
+  plafonnée à 500 entrées).
+- Remarque : l'écoute sur `127.0.0.1:53` peut nécessiter les droits administrateur — sans journal
+  DNS activé, aucune redirection n'est effectuée.
 
 ## Compilation
 

@@ -122,11 +122,8 @@ async fn handle_conn(
     let token = query_param(query, "auth").or_else(|| bearer_token(&text));
 
     if is_api {
-        let expected = shared.dashboard_token.lock().unwrap().clone();
-        let ok = match (&token, &expected) {
-            (Some(given), Some(exp)) if const_time_eq(given, exp) => true,
-            _ => false,
-        };
+        // Authentification multi-méthodes : token actuel | code 6 maj/min | mot de passe admin.
+        let ok = token.as_deref().map(|t| shared.verify_dashboard_credential(t)).unwrap_or(false);
         if !ok {
             return respond(&mut stream, 401, "text/plain", "token absent ou invalide").await;
         }
@@ -141,6 +138,22 @@ async fn handle_conn(
         let (monitoring, body) = api_events(&shared, after);
         let status = if monitoring { 200 } else { 200 };
         return respond(&mut stream, status, "application/json", &body).await;
+    }
+    if path == "/api/status" {
+        let body = api_status(&shared).to_string();
+        return respond(&mut stream, 200, "application/json", &body).await;
+    }
+    if path == "/api/config" {
+        let body = api_config(&shared).to_string();
+        return respond(&mut stream, 200, "application/json", &body).await;
+    }
+    if path == "/api/bigbrother" {
+        let body = api_bigbrother(&shared).to_string();
+        return respond(&mut stream, 200, "application/json", &body).await;
+    }
+    if path == "/api/dns" {
+        let body = api_dns(&shared).to_string();
+        return respond(&mut stream, 200, "application/json", &body).await;
     }
     respond(&mut stream, 404, "text/plain", "not found").await
 }
@@ -194,6 +207,99 @@ fn api_events(shared: &Arc<Shared>, after: u64) -> (bool, String) {
     (true, body.to_string())
 }
 
+/// Snapshot d'état complet du superviseur, servi depuis le serveur local (LAN).
+fn api_status(shared: &Arc<Shared>) -> serde_json::Value {
+    let st = shared.status.lock().unwrap();
+    let cfg = shared.config.lock().unwrap();
+    let big_brother_cfg = crate::big_brother::BigBrotherConfig::load();
+    let big_brother_state = crate::big_brother::BigBrotherState::load();
+    json!({
+        "locked": !shared.monitoring.load(Ordering::Relaxed),
+        "monitoring": shared.monitoring.load(Ordering::Relaxed),
+        "elevated": st.elevated,
+        "session_ok": st.session_ok,
+        "foreground_ok": st.foreground_ok,
+        "recent_ok": st.recent_ok,
+        "security_ok": st.security_ok,
+        "security_note": st.security_note,
+        "computer": crate::win::computer_name(),
+        "version": env!("CARGO_PKG_VERSION"),
+        "dashboard": {
+            "enabled": cfg.dashboard_enabled,
+            "port": cfg.dashboard_port,
+            "listening": st.dashboard_listening,
+            "error": st.dashboard_error,
+        },
+        "dns": {
+            "listening": st.dns_listening,
+            "error": st.dns_error,
+        },
+        "counts": shared.counts.lock().unwrap().clone(),
+        "big_brother": {
+            "enabled": big_brother_cfg.enabled,
+            "domains_count": big_brother_cfg.domains.len(),
+            "blocked_processes_count": big_brother_cfg.blocked_processes.len(),
+            "block_msi": big_brother_cfg.block_msi,
+            "deny_paths_count": big_brother_cfg.deny_paths.len(),
+            "daily_minutes": big_brother_cfg.daily_minutes,
+            "allowed_windows": big_brother_cfg.allowed_windows.len(),
+            "dns_filter": big_brother_cfg.dns_filter,
+            "kernel_driver_active": big_brother_state.kernel_driver_active,
+        },
+    })
+}
+
+/// Snapshot des réglages (sans secrets : le hash PHC admin n'est jamais renvoyé).
+fn api_config(shared: &Arc<Shared>) -> serde_json::Value {
+    let cfg = shared.config.lock().unwrap();
+    json!({
+        "security_log": cfg.security_log,
+        "dashboard_enabled": cfg.dashboard_enabled,
+        "dashboard_port": cfg.dashboard_port,
+        "recent_poll_secs": cfg.recent_poll_secs,
+        "security_poll_secs": cfg.security_poll_secs,
+        "rotate_bytes": cfg.rotate_bytes,
+        "keep_files": cfg.keep_files,
+        "autostart": cfg.autostart,
+        "notify_lock": cfg.notify_lock,
+        "notify_failed_logon": cfg.notify_failed_logon,
+        "github_repo": cfg.github_repo,
+        "admin_protected": cfg.admin_phc.is_some(),
+        "dns_log": cfg.dns_log,
+    })
+}
+
+/// Snapshot de la politique Big Brother (Mode École) pour le dashboard.
+fn api_bigbrother(_shared: &Arc<Shared>) -> serde_json::Value {
+    let cfg = crate::big_brother::BigBrotherConfig::load();
+    let state = crate::big_brother::BigBrotherState::load();
+    json!({
+        "enabled": cfg.enabled,
+        "domains": cfg.domains,
+        "blocked_processes": cfg.blocked_processes,
+        "block_msi": cfg.block_msi,
+        "deny_paths": cfg.deny_paths,
+        "daily_minutes": cfg.daily_minutes,
+        "allowed_windows": cfg.allowed_windows,
+        "dns_filter": cfg.dns_filter,
+        "kernel_driver_active": state.kernel_driver_active,
+        "kernel_blocks_count": state.kernel_blocks_count,
+        "active_secs": state.active_secs,
+        "quota_lock": state.quota_lock,
+    })
+}
+
+/// Journal des requêtes DNS résolues (dernier état, pour le dashboard).
+fn api_dns(shared: &Arc<Shared>) -> serde_json::Value {
+    let queries = shared.dns_queries.lock().unwrap().clone();
+    json!({
+        "count": queries.len(),
+        "queries": queries.iter().map(|q| json!({
+            "id": q.id, "ts": q.ts, "name": q.name, "qtype": q.qtype,
+        })).collect::<Vec<_>>(),
+    })
+}
+
 async fn respond<W>(stream: &mut W, code: u16, ctype: &str, body: &str) -> std::io::Result<()>
 where
     W: tokio::io::AsyncWrite + Unpin,
@@ -244,17 +350,223 @@ fn bearer_token(headers_text: &str) -> Option<String> {
     None
 }
 
-/// Comparaison à temps constant (moins de fuite par temporisation).
-fn const_time_eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
+// ------------------------------------------------------------------ journal DNS
+
+/// Démarre le proxy DNS local : écoute sur `127.0.0.1:53`, redirige les requêtes
+/// vers le résolveur (upstream Big Brother sauvegardé ou 8.8.8.8) et journalise
+/// les requêtes interceptées. Outil de diagnostic réseau — protocole DNS uniquement.
+pub fn spawn_dns_logger(shared: Arc<Shared>) {
+    std::thread::Builder::new()
+        .name("dfwlogger-dns".into())
+        .spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    let mut st = shared.status.lock().unwrap();
+                    st.dns_error = Some(format!("runtime : {e}"));
+                    return;
+                }
+            };
+            rt.block_on(run_dns_loop(shared));
+        })
+        .ok();
+}
+
+/// Active / désactive le journal DNS (cocher de l'onglet Accès réseau).
+pub fn set_dns_logging(shared: &Arc<Shared>, on: bool) {
+    shared.config.lock().unwrap().dns_log = on;
+    if !on {
+        shared.dns_stop.store(true, Ordering::Relaxed);
     }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
+}
+
+async fn run_dns_loop(shared: Arc<Shared>) {
+    loop {
+        if shared.dns_stop.load(Ordering::Relaxed) {
+            return;
+        }
+        {
+            let cfg = shared.config.lock().unwrap();
+            if !cfg.dns_log {
+                return;
+            }
+        }
+        let mut listener = match tokio::net::UdpSocket::bind(("127.0.0.1", 53)).await {
+            Ok(s) => s,
+            Err(e) => {
+                let mut st = shared.status.lock().unwrap();
+                st.dns_listening = false;
+                st.dns_error = Some(format!("port 53 : {e} (droits admin requis ?)"));
+                return;
+            }
+        };
+        {
+            let mut st = shared.status.lock().unwrap();
+            st.dns_listening = true;
+            st.dns_error = None;
+        }
+        eprintln!("journal DNS : ecoute sur 127.0.0.1:53");
+        let mut buf = vec![0u8; 512];
+        loop {
+            let (n, peer) = match tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                listener.recv_from(&mut buf),
+            )
+            .await
+            {
+                Ok(Ok(x)) => x,
+                Ok(Err(_)) => continue,
+                Err(_) => continue,
+            };
+            let _ = handle_dns(&shared, &mut listener, &mut buf, n, peer).await;
+            if shared.dns_stop.load(Ordering::Relaxed) {
+                break;
+            }
+            {
+                let cfg = shared.config.lock().unwrap();
+                if !cfg.dns_log {
+                    break;
+                }
+            }
+        }
+        break;
     }
-    diff == 0
+}
+
+/// Intercepte une requête DNS, la transmet au résolveur, puis renvoie la réponse.
+async fn handle_dns(
+    shared: &Arc<Shared>,
+    listener: &mut tokio::net::UdpSocket,
+    buf: &mut [u8],
+    n: usize,
+    peer: std::net::SocketAddr,
+) {
+    let msg = buf[..n].to_vec();
+    let Some((id, name, qtype)) = parse_dns_query(&msg) else {
+        return;
+    };
+    let state = crate::big_brother::BigBrotherState::load();
+    let (host, port) = upstream_addr(&state);
+    let up = match tokio::net::UdpSocket::bind(("127.0.0.1", 0)).await {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    if up
+        .connect((host.as_str(), port))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), up.send(&msg)).await;
+    let mut out = vec![0u8; 512];
+    let ok = tokio::time::timeout(std::time::Duration::from_secs(3), up.recv(&mut out))
+        .await
+        .map(|r| r.is_ok())
+        .unwrap_or(false);
+    if !ok {
+        return;
+    }
+    shared.push_dns_query(crate::model::DnsQuery {
+        id,
+        ts: chrono::Utc::now().to_rfc3339(),
+        name,
+        qtype,
+    });
+    let _ = listener.send_to(&out[..], &peer).await;
+}
+
+/// Décode une requête DNS : (id, nom interrogé, type) — labels avec pointeur compression supportés.
+fn parse_dns_query(msg: &[u8]) -> Option<(u64, String, String)> {
+    if msg.len() < 12 {
+        return None;
+    }
+    let id = u16::from_be_bytes([msg[0], msg[1]]) as u64;
+    let qdcount = u16::from_be_bytes([msg[4], msg[5]]) as usize;
+    if qdcount == 0 {
+        return None;
+    }
+    let mut labels: Vec<String> = Vec::new();
+    let mut pos = 12usize;
+    let mut jumped = false;
+    let mut end_offset: Option<usize> = None;
+    let mut jumps = 0usize;
+    loop {
+        if pos >= msg.len() {
+            return None;
+        }
+        let len = msg[pos] as usize;
+        if len == 0 {
+            pos += 1;
+            break;
+        }
+        if len & 0xC0 == 0xC0 {
+            if jumps > 0 {
+                return None;
+            }
+            jumps += 1;
+            let ptr = (((len & 0x3F) as usize) << 8) | msg[pos + 1] as usize;
+            if !jumped {
+                end_offset = Some(pos + 2);
+                jumped = true;
+            }
+            pos = ptr;
+            continue;
+        }
+        if len & 0xC0 != 0 {
+            return None;
+        }
+        let start = pos + 1;
+        if start + len > msg.len() {
+            return None;
+        }
+        labels.push(String::from_utf8_lossy(&msg[start..start + len]).to_string());
+        pos = start + len + 1;
+    }
+    let after = end_offset.unwrap_or(pos);
+    if after + 4 > msg.len() {
+        return None;
+    }
+    let qtype = u16::from_be_bytes([msg[after], msg[after + 1]]);
+    let mut name = labels.join(".");
+    while name.ends_with('.') {
+        name.pop();
+    }
+    let qtype_str: String = match qtype {
+        1 => "A".to_string(),
+        5 => "CNAME".to_string(),
+        6 => "SOA".to_string(),
+        15 => "MX".to_string(),
+        16 => "TXT".to_string(),
+        28 => "AAAA".to_string(),
+        33 => "PTR".to_string(),
+        47 => "NS".to_string(),
+        _ => format!("type{qtype}"),
+    };
+    Some((id, name, qtype_str))
+}
+
+/// Résolveur upstream pour le proxy DNS : sauvegarde Big Brother (interfaces),
+/// sinon le DNS public par défaut.
+fn upstream_addr(state: &crate::big_brother::BigBrotherState) -> (String, u16) {
+    let mut server = String::from("8.8.8.8");
+    for v in state.dns_backup.values() {
+        let t = v.trim();
+        if !t.is_empty() && t != "__DHCP__" {
+            server = t.to_string();
+            break;
+        }
+    }
+    let server = server.trim();
+    if let Some((host, port)) = server.rsplit_once(':') {
+        let port = port.parse::<u16>().unwrap_or(53);
+        (host.to_string(), port)
+    } else {
+        (server.to_string(), 53)
+    }
 }
 
 fn load_or_create_tls(dir: &Path) -> Result<rustls::ServerConfig, String> {

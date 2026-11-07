@@ -23,6 +23,8 @@ pub struct Config {
     pub github_repo: Option<String>,
     /// Emprunte Argon2 (PHC) du mot de passe « admin » protégeant les réglages.
     pub admin_phc: Option<String>,
+    /// Journaliser les requêtes DNS résolues (outil type Wireshark — DNS uniquement).
+    pub dns_log: bool,
 }
 
 impl Default for Config {
@@ -40,6 +42,7 @@ impl Default for Config {
             notify_failed_logon: true,
             github_repo: None,
             admin_phc: None,
+            dns_log: false,
         }
     }
 }
