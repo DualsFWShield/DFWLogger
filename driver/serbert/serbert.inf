@@ -1,0 +1,41 @@
+;
+; Serbert.inf — Fichier d'installation du pilote noyau Serbert
+;
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = "Security"
+ClassGuid   = {b85d9b62-6dae-4402-a7d0-9e557b447472}
+Provider    = %ManufacturerName%
+DriverVer   = 11/07/2026,1.0.0.0
+CatalogFile = serbert.cat
+
+[DestinationDirs]
+DefaultDestDir = 12 ; %windir%\system32\drivers
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+serbert.sys = 1,,
+
+[DefaultInstall.NTamd64]
+CopyFiles = Serbert_Files
+
+[DefaultInstall.NTamd64.Services]
+AddService = Serbert,0x00000002,Serbert_Service_Inst
+
+[Serbert_Files]
+serbert.sys
+
+[Serbert_Service_Inst]
+DisplayName    = %Serbert.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\serbert.sys
+
+[Strings]
+ManufacturerName = "DFWLogger"
+DiskName         = "Serbert Installation Disk"
+Serbert.SVCDESC  = "Serbert Kernel Driver (DFWLogger Big Brother)"
+

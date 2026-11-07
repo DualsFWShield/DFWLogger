@@ -12,7 +12,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::System::Registry::{
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY,
-    HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ,
+    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
@@ -183,11 +183,16 @@ pub fn computer_name() -> String {
 // ---- Élévation (optionnelle, consentie par l'utilisateur via UAC) ----
 
 /// Relance l'app avec élévation via PowerShell (boîte UAC de l'utilisateur).
-pub fn relaunch_elevated() -> Result<(), String> {
+pub fn relaunch_elevated_args(extra: &[&str]) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut arglist = vec!["'--elevated'".to_string()];
+    for a in extra {
+        arglist.push(format!("'{a}'"));
+    }
     let script = format!(
-        "Start-Process -FilePath '{}' -ArgumentList '--elevated' -Verb RunAs",
-        exe.display()
+        "Start-Process -FilePath '{}' -ArgumentList {} -Verb RunAs",
+        exe.display(),
+        arglist.join(","),
     );
     std::process::Command::new("powershell")
         .creation_flags(CREATE_NO_WINDOW)
@@ -197,9 +202,48 @@ pub fn relaunch_elevated() -> Result<(), String> {
     Ok(())
 }
 
+/// Relance l'app avec élévation, sans argument supplémentaire.
+pub fn relaunch_elevated() -> Result<(), String> {
+    relaunch_elevated_args(&[])
+}
+
 /// L'app tourne-t-elle avec élévation ?
 pub fn is_elevated() -> bool {
-    std::env::args().any(|a| a == "--elevated")
+    std::env::args().any(|a| a == "--elevated") || is_admin()
+}
+
+/// Vérifie si le processus possède de réels privilèges administrateur (écriture HKLM).
+pub fn is_admin() -> bool {
+    unsafe {
+        let mut hk = HKEY::default();
+        let code = RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            w!("System\\CurrentControlSet"),
+            0,
+            KEY_SET_VALUE,
+            &mut hk,
+        );
+        if code == WIN32_ERROR(0) {
+            let _ = RegCloseKey(hk);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Boîte de dialogue Win32 simple (rapport d'opération en mode console-less).
+pub fn message_box(title: &str, text: &str) {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
+    unsafe {
+        let _ = MessageBoxW(
+            None,
+            &HSTRING::from(text),
+            &HSTRING::from(title),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
 }
 
 /// Vérifie (une fois) si le journal Security est lisible — nécessite une session élevée.

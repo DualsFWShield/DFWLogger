@@ -24,10 +24,15 @@ rem --- raccourcis (Bureau + menu Demarrer) via WScript.Shell ---
 powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $desktop = [Environment]::GetFolderPath('Desktop'); $lnk1 = $ws.CreateShortcut((Join-Path $desktop 'DFWLogger.lnk')); $lnk1.TargetPath = '%DEST%\dfwlogger.exe'; $lnk1.IconLocation = '%DEST%\dfwlogger.exe,0'; $lnk1.Description = 'Superviseur familial transparent'; $lnk1.Save(); $smenu = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\DFWLogger'; if (!(Test-Path $smenu)) { New-Item -ItemType Directory -Force $smenu | Out-Null }; $lnk2 = $ws.CreateShortcut((Join-Path $smenu 'DFWLogger.lnk')); $lnk2.TargetPath = '%DEST%\dfwlogger.exe'; $lnk2.IconLocation = '%DEST%\dfwlogger.exe,0'; $lnk2.Description = 'Superviseur familial transparent'; $lnk2.Save()"
 
 echo.
-echo Installation terminee.
+echo Installation terminee (Mode Familial standard).
 echo   Programme : %DEST%\dfwlogger.exe
 echo   Raccourcis : Bureau + menu Demarrer -^> DFWLogger
 echo   Terminal : "%DEST%\dfwlogger.exe" tail 30
+echo.
+echo   Pour les ecoles et administrateurs de parc :
+echo   Pour installer Big Brother (SYSTEM) et Serbert (Noyau) :
+echo   lancez "install_big_brother.cmd" (ou dfwlogger.exe --install-bigbrother).
+echo   Pour le desinstaller proprement : lancez "uninstall_big_brother.cmd".
 echo.
 echo Remarque : Windows SmartScreen peut demander "Informations
 echo complementaires" puis "Executer quand meme" au premier lancement

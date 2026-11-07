@@ -1,11 +1,154 @@
-# DFWLogger — Superviseur familial transparent
+# DFWLogger — Superviseur familial & Protection active (3 Modes de Privilège)
 
-Application Windows en Rust pour les parents qui veulent suivre l'usage d'un ordinateur
-familial avec le **consentement des enfants** : L'application est **volontairement visible**
-(barre des tâches, Gestionnaire des tâches, liste des applications). C'est une règle assumée
-du projet : il n'y a **aucun mode furtif, aucun keylogger, aucune télémétrie externe**.
+Application Windows en Rust combinant :
+1. **Mode 1 : Sans autorisation (Standard)** : Démarrage par défaut de l'application sans aucune élévation UAC ni modification du système. Supervision familiale consentie et transparente (temps d'écran, applications, fichiers ouverts, sessions, journal chiffré AES-256-GCM, dashboard LAN HTTPS). L'app est **volontairement visible** (barre des tâches, Gestionnaire des tâches, liste des applications). Aucun mode furtif, aucun keylogger, aucune télémétrie externe.
+2. **Mode 2 : Accès Admin (Big Brother SYSTEM)** : Élévation à la demande vers un agent en service Windows (`NT AUTHORITY\SYSTEM`), indomptable par un compte élève non-administrateur, capable de bloquer des sites (hosts/DNS), des applications (watchdog), des installations de logiciels (`DisableMSI=2`), d'interdire l'exécution dans les dossiers élèves (SRP) et d'imposer des quotas/plages horaires WTS.
+3. **Mode 3 : Accès Noyau (Serbert Ring 0)** : Élévation optionnelle de haut niveau vers un pilote noyau Windows (`serbert.sys`) agissant directement dans le Ring 0 via `PsSetCreateProcessNotifyRoutineEx` pour interdire physiquement l'exécution des binaires non autorisés (`STATUS_ACCESS_DENIED`) avant même la création du premier thread en espace utilisateur.
 
-## Ce qui est surveillé
+---
+
+## 🧭 Le Système des 3 Modes de Privilège
+
+L'application est conçue pour respecter strictement le principe du moindre privilège :
+- **L'application démarre TOUJOURS sans autorisation (Mode 1)** : utilisable immédiatement par n'importe quel compte utilisateur standard.
+- **Passage en Accès Admin (Mode 2)** : d'un simple clic ou en ligne de commande (`--mode admin`), l'administrateur active le service Big Brother (SYSTEM).
+- **Passage en Accès Noyau (Mode 3)** : depuis le mode Admin, l'administrateur peut charger le pilote noyau Serbert (`--mode kernel`) pour un verrouillage matériel au Ring 0.
+- **Rétrogradation immédiate** : retour au mode Admin ou Standard en un clic, restaurant instantanément les paramètres réseau et système.
+
+```
+┌─────────────────────────┐       Élévation UAC        ┌─────────────────────────┐       Chargement Driver     ┌─────────────────────────┐
+│  Mode 1 : Standard      │ ─────────────────────────▶ │  Mode 2 : Admin         │ ─────────────────────────▶ │  Mode 3 : Noyau         │
+│  (Sans autorisation)    │                            │  (Big Brother SYSTEM)   │                            │  (Serbert Ring 0)       │
+│                         │ ◀───────────────────────── │                         │ ◀───────────────────────── │                         │
+│  • Journal AES-256-GCM  │      Rétrogradation        │  • Service SYSTEM       │      Rétrogradation        │  • PsSetCreateProcess...│
+│  • Fenêtres & Sessions  │      Désinstallation       │  • Fichier hosts & DNS  │      Déchargement Ring 0   │  • STATUS_ACCESS_DENIED │
+│  • Fichiers récents     │                            │  • DisableMSI & SRP     │                            │  • Zéro thread userland │
+│  • Dashboard LAN HTTPS  │                            │  • Quotas & Watchdog    │                            │  • Anti-kill matériel   │
+└─────────────────────────┘                            └─────────────────────────┘                            └─────────────────────────┘
+```
+
+Big Brother et Serbert sont conçus pour les administrateurs de parc informatique en milieu scolaire (écoles, collèges, lycées, centres de formation, médiathèques) qui souhaitent protéger activement les machines sans installer de solution propriétaire lourde ou opaque.
+
+### 🏛️ Architecture de sécurité double niveau (Ring 3 + Ring 0)
+
+DFWLogger propose une architecture de défense en profondeur à deux niveaux :
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Espace Utilisateur (Ring 3)                     │
+│                                                                        │
+│   [ Compte Élève ] (Standard non-admin)                                │
+│          │                                                             │
+│          ├── Tente de lancer Discord / Launcher / Malware portable     │
+│          ▼                                                             │
+│   [ Service Big Brother ] (NT AUTHORITY\SYSTEM)                        │
+│          ├── Synchronise les règles toutes les 15 s                     │
+│          ├── Watchdog ToolHelp32 (TerminateProcess de secours)         │
+│          ├── Fichier hosts (0.0.0.0 domaines bloqués)                  │
+│          ├── Registre TCP/IP (DNS filtré forcé)                        │
+│          ├── Registre DisableMSI=2 (Blocage installateurs .msi)        │
+│          ├── Politiques Safer/SRP (Interdiction exécution AppData/Temp)│
+│          └── Quotas WTS (Déconnexion de session hors créneaux)         │
+│                                                                        │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ Communication IOCTL (\\.\Serbert)
+┌───────────────────────────────────▼────────────────────────────────────┐
+│                        Espace Noyau (Ring 0)                           │
+│                                                                        │
+│   [ Pilote Serbert (serbert.sys) ]                                     │
+│          ├── PsSetCreateProcessNotifyRoutineEx                         │
+│          │     └── Intercepte CreateProcess au niveau noyau            │
+│          │     └── Retourne STATUS_ACCESS_DENIED immédiatement         │
+│          │     └── 0 cycle CPU gaspillé en Ring 3, pas de thread créé  │
+│          └── Protection anti-terminaison du PID Big Brother            │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### ⚠️ Note d'intégrité & Modèle de sécurité (À lire impérativement)
+
+> **La condition réelle pour que la protection soit impossible à contourner :**
+> **Les comptes élèves / utilisateurs ne doivent pas être membres du groupe Administrateurs locaux.**
+>
+> C'est la norme fondamentale de sécurité dans tout parc informatique scolaire bien administré.
+> 
+> Grâce à l'architecture native Windows retenue :
+> - **Service `NT AUTHORITY\SYSTEM`** : un utilisateur standard ne dispose pas des privilèges Windows (`SeDebugPrivilege` / jeton élevé) requis pour arrêter ou tuer un service s'exécutant sous le compte `SYSTEM`.
+> - **ACL NTFS verrouillée** : le dossier de politique `%ProgramData%\DFWLogger` est configuré avec des listes de contrôle d'accès strictes (`icacls`) : *Contrôle total* pour les Administrateurs et `SYSTEM`, *Lecture seule* (`RX`) pour les Utilisateurs standard. Un élève ne peut ni altérer `big_brother.json`, ni corrompre l'état.
+> - **Auto-réparation périodique** : le service vérifie et ré-applique la politique complète toutes les 15 secondes.
+> - **Fonctionnement Fail-Safe sans le driver** : Serbert (Ring 0) est un module optionnel de renfort. Si le driver n'est pas déployé ou si Windows bloque les drivers non signés WHQL, le service Big Brother (Ring 3) assure seul 100 % des protections via SRP, hosts, DNS et son watchdog sans aucune interruption de service.
+
+### 🛡️ Détail du pilote noyau Serbert (`driver/serbert/`)
+
+Le sous-dossier `driver/serbert/` contient le code source C du pilote noyau Windows (`serbert.c`, `serbert.h`, `serbert.inf`).
+
+- **Mécanisme Ring 0** : utilise le callback officiel `PsSetCreateProcessNotifyRoutineEx`. À chaque tentative de création de processus dans l'OS, Windows interroge Serbert. Si le chemin du binaire correspond à un exécutable interdit (insensible à la casse), le driver assigne `CreateInfo->CreationStatus = STATUS_ACCESS_DENIED`. L'exécutable ne démarre jamais (aucune allocation de mémoire de processus, aucun thread créé).
+- **Protection du contrôleur** : Big Brother enregistre son PID auprès de Serbert via `IOCTL_SERBERT_REGISTER_CONTROLLER`.
+- **Signature Windows (DSE)** : Windows x64 impose la signature de pilotes (Driver Signature Enforcement). Pour tester ou déployer un pilote maison en laboratoire ou environnement contrôlé :
+  1. Activer le mode test : `bcdedit /set testsigning on` (puis redémarrer).
+  2. Compiler le pilote avec Visual Studio + Windows Driver Kit (WDK).
+  3. Signer avec un certificat de test : `SignTool sign /v /s PrivateCertStore /n "SerbertCert" serbert.sys`.
+  4. Déployer et charger le service pilote :
+     ```bat
+     dfwlogger.exe --serbert-install --driver-path C:\Chemin\serbert.sys
+     ```
+
+### Capacités de protection active
+
+| Protection | Niveau | Mécanisme | Action |
+|---|---|---|---|
+| 🛑 **Interception Processus Noyau** | **Ring 0 (Serbert)** | `PsSetCreateProcessNotifyRoutineEx` | Refuse le démarrage du processus avec `STATUS_ACCESS_DENIED` au niveau noyau avant tout thread Ring 3. |
+| 🌐 **Filtrage de sites web** | Ring 3 (Big Brother) | Fichier `hosts` Windows (`System32\drivers\etc\hosts`) | Redirection immédiate des domaines bloqués vers `0.0.0.0` (section `# >>> DFWLOGGER-BIGBROTHER-BLOCK >>>` auto-réparée, vidage du cache DNS). |
+| 🛡️ **DNS filtré sécurisé** | Ring 3 (Big Brother) | Paramètres TCP/IP registre `HKLM\...\Interfaces` | Force un résolveur DNS filtrant (CleanBrowsing, Cloudflare Family 1.1.1.3, AdGuard Family ou personnalisé). Valeurs d'origine sauvegardées pour restauration. |
+| 🛑 **Watchdog d'applications** | Ring 3 (Big Brother) | Instantané de processus ToolHelp32 | Énumération continue et arrêt immédiat (`TerminateProcess`) des `.exe` interdits en cas d'absence du pilote Ring 0. |
+| 🚫 **Blocage d'installations MSI** | Ring 3 (Big Brother) | Politique machine `DisableMSI=2` | Désactive totalement l'exécutable Windows Installer pour empêcher l'installation de programmes `.msi`. |
+| 📁 **Interdiction d'exécuter depuis les dossiers élèves** | Ring 3 (Big Brother) | Règles Safer / Software Restriction Policies (SRP) | Interdit le lancement de tout binaire `.exe` depuis les répertoires inscriptibles sans droits admin (`Downloads`, `Desktop`, `AppData\Local\Temp`). Un élève ne peut pas lancer un binaire téléchargé depuis son navigateur. |
+| ⏱️ **Quotas & Plages horaires** | Ring 3 (Big Brother) | Énumération de session WTS (`WTSEnumerateSessionsW`) | Déconnexion automatique de la session console active (`WTSDisconnectSession`) en cas de dépassement du quota journalier ou hors des créneaux scolaires autorisés (ex. Lun-Ven 08:00 - 18:00). |
+| 🪂 **Politique Fail-Open** | Ring 3 & 0 | Absence de `big_brother.json` = aucune restriction | Si la politique est supprimée ou désactivée, le système ne bloque rien, évitant tout risque de verrouillage accidentel. |
+
+---
+
+## 🧰 Déploiement et Désinstallation propre
+
+Le Mode École peut être installé, piloté et désinstallé de manière totalement propre soit par interface graphique, soit par scripts batch automatisables (GPO, Microsoft Intune, WAPT, clé USB).
+
+### 1. Via l'interface graphique (onglet « 🛡️ 3 Modes & Protection »)
+- **Barre supérieure de progression** : visualise en temps réel `[⚪ 1. Sans autorisation] ➔ [🛡️ 2. Accès Admin] ➔ [⚡ 3. Accès Noyau]`.
+- **Passage en Mode Admin (Big Brother)** : bouton « 🛡️ Passer en Accès Admin » (déclenche l'élévation UAC, installe et démarre le service SYSTEM).
+- **Passage en Mode Noyau (Serbert)** : bouton « ⚡ Passer en Accès Noyau » (enregistre et charge le pilote Ring 0).
+- **Rétrogradation propre** : boutons « ↩️ Rétrograder » pour revenir au mode inférieur en un clic.
+
+### 2. Via les scripts fournis
+- **Installation / Déploiement Big Brother** :
+  ```bat
+  install_big_brother.cmd
+  ```
+  *(Déploie l'exécutable dans `%ProgramData%\DFWLogger`, enregistre le service SYSTEM `DFWLoggerBigBrother` et applique les permissions NTFS strictes).*
+- **Désinstallation propre complète** :
+  ```bat
+  uninstall_big_brother.cmd
+  ```
+  *(Arrête et supprime le service Windows `DFWLoggerBigBrother`, décharge le pilote `Serbert` s'il est présent, retire la section du fichier `hosts`, restaure le DNS d'origine, supprime `DisableMSI` et les règles Safer/SRP, vide le cache DNS et propose la purge de `%ProgramData%\DFWLogger`).*
+
+### 3. En ligne de commande (pour scripts d'automatisation)
+```bat
+rem Basculement direct entre les 3 Modes :
+dfwlogger.exe --mode standard                 rem Rétrograde en Mode 1 (Sans autorisation, nettoie Admin et Noyau)
+dfwlogger.exe --mode admin                    rem Élève et active le Mode 2 (Service SYSTEM Big Brother)
+dfwlogger.exe --mode kernel                   rem Élève et active le Mode 3 (Service SYSTEM + Pilote Ring 0 Serbert)
+dfwlogger.exe --status                        rem Affiche le mode actif et les détails du système
+
+rem Commandes de gestion avancée :
+dfwlogger.exe --install-bigbrother --quiet    rem Installe et démarre le service SYSTEM
+dfwlogger.exe --uninstall-bigbrother --quiet  rem Désinstalle et retire toutes les restrictions
+dfwlogger.exe --bigbrother-apply              rem Force l'application immédiate de big_brother.json
+dfwlogger.exe --serbert-status                rem Interroge l'état du driver noyau \\.\Serbert
+dfwlogger.exe --serbert-install
+dfwlogger.exe --serbert-uninstall
+```
+
+---
+
+## Ce qui est surveillé (Mode Familial)
 
 | Événement | Méthode (sans droits admin) |
 |---|---|
@@ -88,7 +231,7 @@ Le repo embarque une GitHub Action (`.github/workflows/build.yml`) :
 3. Audit des dépendances à chaque build : `cargo deny` (licences MIT/Apache/BSD/ISC +
    vulnérabilités RustSec — `deny.toml`).
 4. Le zip est aussi disponible comme artifact de run pour les pull requests.
-   Le zip contient `dfwlogger.exe`, `README.md` et `installer.cmd`.
+   Le zip contient `dfwlogger.exe`, `README.md`, `installer.cmd`, `install_big_brother.cmd` et `uninstall_big_brother.cmd`.
 
 Pour publier la première version :
 

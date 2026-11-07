@@ -75,8 +75,10 @@ jobs:
           Copy-Item target\release\dfwlogger.exe dist\dfwlogger.exe
           Copy-Item README.md dist\README.md
           Copy-Item installer.cmd dist\installer.cmd
+          Copy-Item install_big_brother.cmd dist\install_big_brother.cmd
+          Copy-Item uninstall_big_brother.cmd dist\uninstall_big_brother.cmd
           $tag = "${{ steps.ver.outputs.tag }}"
-          Compress-Archive -Path dist\dfwlogger.exe, dist\README.md, dist\installer.cmd -DestinationPath "dfwlogger-$tag-win64.zip"
+          Compress-Archive -Path dist\* -DestinationPath "dfwlogger-$tag-win64.zip"
           (Get-Item "dfwlogger-$tag-win64.zip").Length
 
       - name: Upload artifact (tous les builds)
