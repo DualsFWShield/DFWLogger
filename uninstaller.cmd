@@ -2,11 +2,11 @@
 rem ============================================================================
 rem  DFWLogger - DESINSTALLATEUR UNIQUE
 rem  Desinstallation complete de l'application :
-rem   - Retrait des protections Big Brother / Serbert (SYSTEM + Ring 0)
-rem   - Arret et suppression des services Windows
-rem   - Restauration DNS / hosts / registre / quotas
-rem   - Suppression des raccourcis (Bureau + menu Demarrer)
-rem   - Suppression des dossiers applicatifs et des donnees utilisateur
+rem   1. Arret de l'application et retrait des protections Big Brother / Serbert
+rem   2. Arret et suppression des services Windows (SYSTEM + Ring 0)
+rem   3. Restauration DNS / hosts / registre / quotas
+rem   4. Suppression des raccourcis (Bureau + menu Demarrer)
+rem   5. Suppression des dossiers applicatifs et des donnees utilisateur
 rem ============================================================================
 setlocal EnableDelayedExpansion
 
@@ -18,8 +18,9 @@ if %errorlevel% neq 0 (
 )
 
 echo ============================================================================
-echo   DFWLogger - DESINSTALLATION UNIE
+echo   DFWLogger - DESINSTALLATION COMPLETE
 echo ============================================================================
+echo.
 
 set "EXE=%~dp0dfwlogger.exe"
 if not exist "%EXE%" (
@@ -49,10 +50,10 @@ echo [4/8] Vidage du cache DNS...
 ipconfig /flushdns >nul 2>&1
 
 echo [5/8] Suppression des raccourcis (Bureau + menu Demarrer)...
-powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $desktop = [Environment]::GetFolderPath('Desktop'); $lnk1 = Join-Path $desktop 'DFWLogger.lnk'; if (Test-Path $lnk1) { Remove-Item $lnk1 -Force }; $sm = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\DFWLogger'; if (Test-Path $sm) { Remove-Item -Recurse -Force $sm }"
+powershell -NoProfile -Command "$desktop = [Environment]::GetFolderPath('Desktop'); $lnk = Join-Path $desktop 'DFWLogger.lnk'; if (Test-Path $lnk) { Remove-Item $lnk -Force }; $sm = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\DFWLogger'; if (Test-Path $sm) { Remove-Item -Recurse -Force $sm }"
 
-echo [6/8] Suppression du dossier de l application...
-set /p "CLEAN_APP=Effacer le dossier de l application %LOCALAPPDATA%\Programs\DFWLogger ? (O/N, defaut: O) : "
+echo [6/8] Suppression du dossier de l'application...
+set /p "CLEAN_APP=Effacer %LOCALAPPDATA%\Programs\DFWLogger ? (O/N, defaut: O) : "
 if /i "%CLEAN_APP%"=="O" (
     powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '%LOCALAPPDATA%\Programs\DFWLogger'"
 )
@@ -64,7 +65,7 @@ if /i "%CLEAN_DATA%"=="O" (
 )
 
 echo [8/8] Suppression des donnees Big Brother (politique + etat)...
-set /p "CLEAN_BB=Effacer les donnees Big Brother (politique + etat) %ProgramData%\DFWLogger ? (O/N, defaut: O) : "
+set /p "CLEAN_BB=Effacer les donnees Big Brother %ProgramData%\DFWLogger ? (O/N, defaut: O) : "
 if /i "%CLEAN_BB%"=="O" (
     powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '%ProgramData%\DFWLogger'"
 )
@@ -78,3 +79,4 @@ echo   - Raccourcis et dossiers nettoyes.
 echo ============================================================================
 echo.
 pause
+

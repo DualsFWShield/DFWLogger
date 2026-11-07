@@ -154,22 +154,20 @@ DFWLogger intègre un serveur web HTTPS autonome (propulsé par `tokio` et `rust
    ```bat
    installer.cmd
    ```
-   *Installe le binaire dans `%LOCALAPPDATA%\Programs\DFWLogger`, crée les raccourcis Bureau et menu Démarrer, et propose l'activation optionnelle du Mode Admin.*
+   *Installe le binaire dans `%LOCALAPPDATA%\Programs\DFWLogger`, crée les raccourcis Bureau et menu Démarrer, et propose l'activation optionnelle du Mode École (Big Brother SYSTEM + pilote Serbert Ring 0) avec auto-élévation UAC.*
 
 ### Déploiement de parc scolaire (GPO / Intune / WAPT)
 Pour déployer silencieusement sur l'ensemble d'un parc :
 ```bat
-rem Installation et activation du service SYSTEM Big Brother :
-install_big_brother.cmd
-rem Ou via ligne de commande directe :
 dfwlogger.exe --install-bigbrother --quiet
 ```
 
 ### Désinstallation complète et propre (Zéro trace)
 Pour restaurer la configuration d'origine de la machine (DNS, hosts, registre, suppression des services et purge des données) :
 ```bat
-uninstall_big_brother.cmd
+uninstaller.cmd
 ```
+*Le script s'auto-élève en administrateur (UAC), retire toutes les protections, arrête et supprime les services Windows (`DFWLoggerBigBrother`, `Serbert`), restaure le système, puis propose la suppression des dossiers applicatifs et des données utilisateur.*
 
 ---
 
@@ -259,7 +257,7 @@ cargo deny check licenses advisories sources
 1. Compilation et exécution de l'intégralité des tests unitaires (`cargo test`).
 2. Audit automatisé des vulnérabilités de dépendances et des licences via `cargo-deny`.
 3. Génération du binaire release optimisé (`lto = "thin"`, `strip = true`).
-4. Empaquetage automatique de l'archive `dfwlogger-win64.zip` contenant le binaire, les scripts batch d'administration et la documentation.
+4. Empaquetage automatique de l'archive `dfwlogger-win64.zip` contenant le binaire, les scripts d'installation/désinstallation et la documentation.
 5. Publication automatique d'une release GitHub horodatée et versionnée.
 
 ---

@@ -68,15 +68,14 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-      - name: Package (exe + README + installateur)
+      - name: Package (exe + README + scripts)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target\release\dfwlogger.exe dist\dfwlogger.exe
           Copy-Item README.md dist\README.md
           Copy-Item installer.cmd dist\installer.cmd
-          Copy-Item install_big_brother.cmd dist\install_big_brother.cmd
-          Copy-Item uninstall_big_brother.cmd dist\uninstall_big_brother.cmd
+          Copy-Item uninstaller.cmd dist\uninstaller.cmd
           $tag = "${{ steps.ver.outputs.tag }}"
           Compress-Archive -Path dist\* -DestinationPath "dfwlogger-$tag-win64.zip"
           (Get-Item "dfwlogger-$tag-win64.zip").Length
@@ -104,7 +103,8 @@ jobs:
             "DFWLogger $($tag.Replace('-b', ' build '))",
             "",
             "- Windows 10/11 x64 — exe non signé (Windows SmartScreen peut demander *exécuter quand même*)",
-            "- Installation : extraire le zip puis lancer `installer.cmd` (copie + raccourcis, sans élévation)",
+            "- Installation : extraire le zip puis lancer ``installer.cmd`` (copie + raccourcis, sans élévation)",
+            "- Désinstallation : lancer ``uninstaller.cmd`` (suppression complète avec élévation UAC)",
             "- Consignes : voir README dans le zip — `cargo` non requis pour utiliser l'exe",
             "- Commit : $sha",
             "- L'app est transparente : visible dans la barre des tâches, pas de keylogger ni de collecte distante"
