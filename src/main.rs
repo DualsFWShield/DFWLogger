@@ -11,10 +11,12 @@ mod config;
 mod dashhtml;
 mod model;
 mod net;
+mod notify;
 mod shared;
 mod store;
 mod tray;
 mod ui;
+mod update;
 mod win;
 
 use shared::Shared;
@@ -80,6 +82,9 @@ fn main() -> eframe::Result<()> {
 
     collect::spawn_all(shared.clone());
     net::spawn_dashboard(shared.clone());
+    // Toasts : enregistrement du nom d'app (HKCU) + vérification de mise à jour.
+    notify::ensure_aumid();
+    update::start_checker(shared.clone());
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()

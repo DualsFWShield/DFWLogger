@@ -15,6 +15,10 @@ pub struct Status {
     pub security_note: String,
     pub dashboard_listening: bool,
     pub dashboard_error: Option<String>,
+    /// Note de vérification de mise à jour (résultat ou état du processus).
+    pub update_note: Option<String>,
+    /// URL de la release plus récente, cliquable depuis l'UI.
+    pub update_url: Option<String>,
 }
 
 /// État partagé entre l'UI, les collecteurs, l'icône tray et le serveur dashboard.
@@ -25,6 +29,8 @@ pub struct Shared {
     pub counts: Mutex<BTreeMap<&'static str, u64>>,
     /// Temps cumulé (secondes de premier plan) par exécutable, depuis la session active.
     pub app_times: Mutex<BTreeMap<String, u64>>,
+    /// Heatmap d'usage : (début de créneau horaire UTC en s d'époque) → secondes d'app au premier plan.
+    pub heatmap: Mutex<BTreeMap<u64, u64>>,
     pub status: Mutex<Status>,
     pub monitoring: AtomicBool,
     pub next_id: AtomicU64,
@@ -43,6 +49,7 @@ impl Shared {
             events: Mutex::new(VecDeque::with_capacity(2048)),
             counts: Mutex::new(BTreeMap::new()),
             app_times: Mutex::new(BTreeMap::new()),
+            heatmap: Mutex::new(BTreeMap::new()),
             status: Mutex::new(Status {
                 elevated,
                 ..Status::default()
@@ -79,12 +86,13 @@ impl Shared {
         }
         {
             let mut ev = self.events.lock().unwrap();
-            ev.push_back(event);
+            ev.push_back(event.clone());
             while ev.len() > 2000 {
                 ev.pop_front();
             }
         }
         self.dirty.store(true, Ordering::Relaxed);
+        crate::notify::maybe_toast(self, &event.kind);
     }
 
     /// Charge l'historique déchiffré dans la mémoire vive (fin d'historique = premier affiché).
@@ -101,6 +109,32 @@ impl Shared {
             *counts.entry(e.kind.label()).or_insert(0) += 1;
         }
         drop(counts);
+
+        // Heatmap : reconstitution des créneaux horaires d'usage à partir des
+        // sessions d'application journalisées (un événement avec durée == une
+        // session d'usage terminée — pas de double comptage).
+        {
+            let mut heat = self.heatmap.lock().unwrap();
+            heat.clear();
+            for e in &events {
+                if let EventKind::AppFocus {
+                    duration_secs: Some(s),
+                    ..
+                } = &e.kind
+                {
+                    if *s > 0 {
+                        if let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&e.ts) {
+                            add_heat_range(
+                                &mut heat,
+                                ts.timestamp() - *s as i64,
+                                *s,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         let mut ev = self.events.lock().unwrap();
         ev.clear();
         let start = events.len().saturating_sub(keep);
@@ -109,10 +143,28 @@ impl Shared {
         }
     }
 
-    /// Ajoute des secondes de premier plan à un exécutable.
-    pub fn record_app_seconds(&self, exe: &str, secs: u64) {
-        let mut times = self.app_times.lock().unwrap();
-        *times.entry(exe.to_string()).or_insert(0) += secs;
+    /// Ajoute des secondes de premier plan à un exécutable, et met à jour la
+    /// heatmap (créneaux horaires reconstitués depuis l'instant de début).
+    pub fn record_app_time(&self, exe: &str, secs: u64) {
+        if secs == 0 {
+            return;
+        }
+        {
+            let mut times = self.app_times.lock().unwrap();
+            *times.entry(exe.to_string()).or_insert(0) += secs;
+        }
+        {
+            let now = Utc::now().timestamp();
+            let mut heat = self.heatmap.lock().unwrap();
+            add_heat_range(&mut heat, now - secs as i64, secs);
+        }
+        self.dirty.store(true, Ordering::Relaxed);
+    }
+
+    #[allow(dead_code)]
+    /// Ne pas utiliser : la heatmap est refaite depuis le journal au déverrouillage.
+    pub fn clear_heatmap(&self) {
+        self.heatmap.lock().unwrap().clear();
         self.dirty.store(true, Ordering::Relaxed);
     }
 
@@ -132,8 +184,53 @@ impl Shared {
         self.events.lock().unwrap().clear();
         self.counts.lock().unwrap().clear();
         self.app_times.lock().unwrap().clear();
+        self.heatmap.lock().unwrap().clear();
         self.next_id.store(1, Ordering::Relaxed);
         *self.dashboard_token.lock().unwrap() = None;
         self.monitoring.store(false, Ordering::Relaxed);
     }
+}
+
+/// Répartit `secs` secondes d'usage sur les créneaux horaires UTC couverts
+/// (slot = début de l'heure en s d'époque, arrondi au dessous).
+fn add_heat_range(map: &mut BTreeMap<u64, u64>, start: i64, secs: u64) {
+    if secs == 0 {
+        return;
+    }
+    let mut cur = start;
+    let mut left = secs as i64;
+    while left > 0 {
+        let slot = cur.div_euclid(3600) * 3600;
+        let slot_end = slot + 3600;
+        let take = (slot_end - cur).max(0).min(left);
+        if take == 0 {
+            break;
+        }
+        *map.entry(slot as u64).or_insert(0) += take as u64;
+        left -= take;
+        cur = slot_end;
+    }
+}
+
+/// Données de heatmap des `days` derniers jours, pour l'UI et le dashboard :
+/// (libellé du jour local, heure locale 0–23, secondes d'usage).
+pub fn heatmap_rows(map: &BTreeMap<u64, u64>, days: u32) -> Vec<(String, u32, u64)> {
+    use chrono::{Datelike, TimeZone};
+    let today = chrono::Local::now().date_naive();
+    let mut out = Vec::new();
+    for d in 0..days {
+        let date = today - chrono::Duration::days(d as i64);
+        for h in 0..24 {
+            let (y, m, day) = (date.year(), date.month(), date.day());
+            let secs = match chrono::Local.with_ymd_and_hms(y, m, day, h, 0, 0) {
+                chrono::LocalResult::Single(ts) => {
+                    let slot = ts.timestamp().div_euclid(3600) * 3600;
+                    map.get(&(slot as u64)).copied().unwrap_or(0)
+                }
+                _ => 0,
+            };
+            out.push((date.to_string(), h, secs));
+        }
+    }
+    out
 }

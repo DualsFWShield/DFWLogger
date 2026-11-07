@@ -13,7 +13,6 @@ du projet : il n'y a **aucun mode furtif, aucun keylogger, aucune télémétrie 
 | 🪟 Application au premier plan | Fenêtre au premier plan + chemin de l'exécutable (2 s) |
 | 📁 Fichiers ouverts | Dossier Recent (raccourcis `.lnk` résolus, 30 s) |
 | ⚠️ Échecs de connexion Windows (event 4625) | Journal Security via `wevtutil` — **nécessite une relance en élévation (option)** |
-
 Tout est écrit, **chiffré**, dans `%LOCALAPPDATA%\DFWLogger\` :
 
 - `journal.enc` (+ `journal.N.enc` pivotés) — AES-256-GCM, un enregistrement = un nonce.
@@ -27,6 +26,22 @@ Tout est écrit, **chiffré**, dans `%LOCALAPPDATA%\DFWLogger\` :
   Réglages (autostart registre HKCU, dashboard, rétention) · Accès réseau · Aide.
 - Déverrouillage par mot de passe parent (première ouverture : création du mot de passe).
 - Bouton « Verrouiller le journal maintenant » : purge la clé mémoire + le blob DPAPI.
+
+## Nouveautés 0.3.0
+
+- **🔔 Notifications toast Windows** : « Session verrouillée » et « Tentative de connexion
+  échouée » (désactivables dans Réglages). L'identifiant d'app est enregistré en HKCU,
+  envoi via WinRT/PowerShell — aucune élévation.
+- **🗓 Heatmap 24 h × 7 j** (UI + dashboard) : usage par créneau horaire, reconstitué
+  depuis le journal chiffré.
+- **🔄 Vérification de mise à jour** : consulte l'API GitHub Releases de votre dépôt
+  (`compte/repo` à renseigner dans Réglages), affiche le résultat dans Statut avec lien
+  cliquable. Aucune donnée personnelle envoyée.
+- **🔐 Réglages protégés** : second mot de passe « admin » (Argon2id, PHC dans la config)
+  pour empêcher la désactivation de l'autostart / dashboard / collecte. Distinct du mot
+  de passe du journal ; activable dans Réglages.
+- **🧰 Installeur utilisateur** : `installer.cmd` copie l'exe dans
+  `%LOCALAPPDATA%\Programs\DFWLogger` + raccourcis Bureau/menu Démarrer (sans élévation).
 
 ## Tray, fenêtre et terminal (sans admin)
 
@@ -70,7 +85,10 @@ Le repo embarque une GitHub Action (`.github/workflows/build.yml`) :
 2. Publication automatique d'une **release versionnée** : tag `v<cargo-version>-b<build#>`
    (ex. `v0.2.0-b12`) calculé depuis Cargo.toml + le numéro de run — un push = une nouvelle
    release marquée latest. Les tags manuels `v*` publient sous leur propre nom.
-3. Le zip est aussi disponible comme artifact de run pour les pull requests.
+3. Audit des dépendances à chaque build : `cargo deny` (licences MIT/Apache/BSD/ISC +
+   vulnérabilités RustSec — `deny.toml`).
+4. Le zip est aussi disponible comme artifact de run pour les pull requests.
+   Le zip contient `dfwlogger.exe`, `README.md` et `installer.cmd`.
 
 Pour publier la première version :
 

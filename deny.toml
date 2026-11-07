@@ -1,0 +1,32 @@
+# cargo-deny : audit des dépendances (licences, vulnérabilités, sources).
+# CI : `cargo deny check licenses advisories sources` (voir .github/workflows/build.yml)
+
+[graph]
+targets = [{ triple = "x86_64-pc-windows-msvc" }, { triple = "aarch64-apple-darwin" }]
+
+[advisories]
+# Échec si une vulnérabilité RustSec connue touche le graphe de dépendances.
+yanked = "warn"
+ignore = []
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+    "OpenSSL",
+    "BSL-1.0",
+]
+confidence-threshold = 0.93
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

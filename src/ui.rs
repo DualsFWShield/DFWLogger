@@ -24,6 +24,13 @@ pub struct DfwApp {
     remember: bool,
     err: Option<String>,
     info: Option<String>,
+    /// Mot de passe « admin » en cours de saisie (déverrouillage des réglages).
+    admin_password: String,
+    /// Création du mot de passe admin : saisie + confirmation.
+    new_admin: String,
+    new_admin_confirm: String,
+    /// Réglages déverrouillés pour cette session (quand un mot de passe admin est défini).
+    admin_unlocked: bool,
 }
 
 impl DfwApp {
@@ -39,6 +46,10 @@ impl DfwApp {
             remember: true,
             err: None,
             info: None,
+            admin_password: String::new(),
+            new_admin: String::new(),
+            new_admin_confirm: String::new(),
+            admin_unlocked: false,
         };
         // Reprise automatique via DPAPI si dispo.
         let mut store_guard = app.shared.store.lock().unwrap();
@@ -238,6 +249,14 @@ impl DfwApp {
             }
         }
 
+        ui.add_space(14.0);
+        ui.heading("🗓 Usage par jour et par heure (7 derniers jours)");
+        ui.add_space(4.0);
+        draw_heatmap(ui, &self.shared);
+
+        ui.add_space(10.0);
+        draw_update_section(ui, &self.shared, &mut self.info, &mut self.err);
+
         ui.add_space(10.0);
         if ui.button("🔒 Verrouiller le journal maintenant").clicked() {
             self.do_lock();
@@ -303,6 +322,48 @@ impl DfwApp {
         let mut cfg = self.shared.config.lock().unwrap().clone();
         let dir = store_dir(&self.shared);
 
+        // ---- Verrou « admin » : deuxième mot de passe distinct du mot de passe journal ----
+        let admin_required = cfg.admin_phc.is_some();
+        if admin_required && !self.admin_unlocked {
+            ui.group(|ui| {
+                ui.label("🔒 Réglages protégés par le mot de passe admin");
+                ui.add_space(4.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.admin_password)
+                        .password(true)
+                        .hint_text("Mot de passe admin")
+                        .desired_width(260.0),
+                );
+                if ui.button("Déverrouiller les réglages").clicked() {
+                    let pass = std::mem::take(&mut self.admin_password);
+                    if verify_admin_phc(cfg.admin_phc.as_deref().unwrap_or(""), &pass) {
+                        self.admin_unlocked = true;
+                        self.info = Some("Réglages déverrouillés pour cette session.".into());
+                        self.err = None;
+                    } else {
+                        self.err = Some("Mot de passe admin incorrect.".into());
+                        self.info = None;
+                    }
+                }
+            });
+            show_message(self, ui);
+            return;
+        }
+
+        ui.group(|ui| {
+            ui.label(if admin_required {
+                "🔓 Protection admin active (déverrouillée pour cette session)"
+            } else {
+                "🔓 Aucun mot de passe admin — quiconque ouvre cette fenêtre peut modifier les réglages"
+            });
+            ui.label(
+                egui::RichText::new(
+                    "Astuce : définissez un mot de passe admin pour empêcher un enfant de désactiver l'autostart, le dashboard ou la collecte. Il est distinct du mot de passe du journal.",
+                ).small(),
+            );
+        });
+
+        ui.add_space(6.0);
         ui.group(|ui| {
             ui.label("Démarrage");
             ui.checkbox(&mut cfg.autostart, "Démarrer automatiquement avec la session (registre utilisateur)");
@@ -390,6 +451,51 @@ impl DfwApp {
 
         ui.add_space(6.0);
         ui.group(|ui| {
+            ui.label("🔔 Notifications Windows");
+            ui.checkbox(&mut cfg.notify_lock, "Prévenir quand la session est verrouillée");
+            ui.checkbox(
+                &mut cfg.notify_failed_logon,
+                "Prévenir à chaque échec de connexion (4625)",
+            );
+            ui.add_space(4.0);
+            if ui.button("Enregistrer").clicked() {
+                match cfg.save(&dir) {
+                    Ok(()) => {
+                        *self.shared.config.lock().unwrap() = cfg.clone();
+                        self.info = Some("Notifications enregistrées.".into());
+                    }
+                    Err(e) => self.err = Some(e),
+                }
+            }
+        });
+
+        ui.add_space(6.0);
+        ui.group(|ui| {
+            ui.label("🔄 Vérification de mise à jour");
+            let mut repo = cfg.github_repo.clone().unwrap_or_default();
+            ui.add(
+                egui::TextEdit::singleline(&mut repo)
+                    .hint_text("compte/repo (ex. famille/DFWLogger)")
+                    .desired_width(280.0),
+            );
+            ui.add_space(4.0);
+            if ui.button("Enregistrer").clicked() {
+                cfg.github_repo = {
+                    let r = repo.trim().to_string();
+                    (!r.is_empty()).then_some(r)
+                };
+                match cfg.save(&dir) {
+                    Ok(()) => {
+                        *self.shared.config.lock().unwrap() = cfg.clone();
+                        self.info = Some("Dépôt de mise à jour enregistré.".into());
+                    }
+                    Err(e) => self.err = Some(e),
+                }
+            }
+        });
+
+        ui.add_space(6.0);
+        ui.group(|ui| {
             ui.label("Journal Security — échecs de connexion (élévation optionnelle)");
             let st = self.shared.status.lock().unwrap();
             if st.elevated {
@@ -405,6 +511,69 @@ impl DfwApp {
                         self.err = Some(e);
                     } else {
                         std::process::exit(0);
+                    }
+                }
+            }
+        });
+
+        ui.add_space(6.0);
+        // ---- Administration du mot de passe admin ----
+        ui.group(|ui| {
+            if admin_required {
+                ui.label("🔐 Mot de passe admin");
+                if ui.button("Désactiver la protection").clicked() {
+                    cfg.admin_phc = None;
+                    self.admin_unlocked = true;
+                    match cfg.save(&dir) {
+                        Ok(()) => {
+                            *self.shared.config.lock().unwrap() = cfg.clone();
+                            self.info =
+                                Some("Protection admin désactivée (Réglages à nouveau libres).".into());
+                        }
+                        Err(e) => self.err = Some(e),
+                    }
+                }
+                if ui.button("Reverrouiller maintenant").clicked() {
+                    self.admin_unlocked = false;
+                }
+            } else {
+                ui.label("🔐 Créer un mot de passe admin (protéger les réglages)");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.new_admin)
+                        .password(true)
+                        .hint_text("Mot de passe admin")
+                        .desired_width(260.0),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.new_admin_confirm)
+                        .password(true)
+                        .hint_text("Confirmation")
+                        .desired_width(260.0),
+                );
+                if ui.button("Activer la protection").clicked() {
+                    let pass = std::mem::take(&mut self.new_admin);
+                    let confirm = std::mem::take(&mut self.new_admin_confirm);
+                    if pass.len() < 8 {
+                        self.err = Some("mot de passe admin : 8 caractères minimum".into());
+                    } else if pass != confirm {
+                        self.err = Some("les deux mots de passe ne correspondent pas".into());
+                    } else if let Some(phc) = hash_admin_phc(&pass) {
+                        cfg.admin_phc = Some(phc);
+                        self.admin_unlocked = true;
+                        match cfg.save(&dir) {
+                            Ok(()) => {
+                                *self.shared.config.lock().unwrap() = cfg.clone();
+                                self.info = Some(
+                                    "Protection admin activée : les réglages demandent désormais \
+le mot de passe admin."
+                                        .into(),
+                                );
+                                self.err = None;
+                            }
+                            Err(e) => self.err = Some(e),
+                        }
+                    } else {
+                        self.err = Some("dérivation Argon2 impossible".into());
                     }
                 }
             }
@@ -481,6 +650,100 @@ fn indic(ok: bool, op: &str) -> String {
     if ok { format!("✅ {op}") } else { format!("⏳ en attente de confirmation") }
 }
 
+/// Grille 7 jours × 24 heures d'usage ; cellules colorées selon l'intensité.
+fn draw_heatmap(ui: &mut egui::Ui, shared: &Arc<Shared>) {
+    let rows = {
+        let map = shared.heatmap.lock().unwrap();
+        crate::shared::heatmap_rows(&map, 7)
+    };
+    ui.label(egui::RichText::new("Estimation : applications au premier plan, reconstituée depuis le journal chiffré.").weak());
+    ui.add_space(4.0);
+    let cell = egui::vec2(20.0, 13.0);
+    // Étiquettes d'heures au-dessus.
+    egui::Grid::new("heat-hours").num_columns(25).show(ui, |ui| {
+        ui.weak("");
+        for h in 0..24 {
+            ui.label(
+                egui::RichText::new(if h % 3 == 0 { format!("{h}") } else { String::new() })
+                    .small(),
+            );
+        }
+        ui.end_row();
+    });
+    egui::Grid::new("heat-grid").num_columns(25).show(ui, |ui| {
+        for day_idx in 0..7 {
+            // heatmap_rows est du plus récent au plus ancien ; affiche du vieux en haut.
+            let base = (6 - day_idx) * 24;
+            let label = rows[base].0.clone();
+            ui.label(egui::RichText::new(label).small());
+            for h in 0..24 {
+                let secs = rows[base + h].2;
+                let intensity = ((secs as f32) / 1800.0).clamp(0.0, 1.0);
+                let c = if secs == 0 {
+                    egui::Color32::from_rgb(38, 40, 52)
+                } else {
+                    let lerp = |a: f32, b: f32| (a + (b - a) * intensity) as u8;
+                    egui::Color32::from_rgb(
+                        lerp(45.0, 70.0),
+                        lerp(55.0, 190.0),
+                        lerp(70.0, 120.0),
+                    )
+                };
+                let (rect, resp) = ui.allocate_exact_size(cell, egui::Sense::hover());
+                ui.painter().rect_filled(rect, 2.0, c);
+                if resp.hovered() && secs > 0 {
+                    resp.clone()
+                        .on_hover_text(format!(
+                            "{} {:02}:00 — {}",
+                            rows[base + h].0,
+                            h,
+                            crate::model::format_hms(secs)
+                        ));
+                }
+            }
+            ui.end_row();
+        }
+    });
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new("Vert foncé → clair : usage croissant (1800 s = teinte max).").weak());
+}
+
+/// Section « Mise à jour » du Statut : note + bouton clic.
+fn draw_update_section(
+    ui: &mut egui::Ui,
+    shared: &Arc<Shared>,
+    info: &mut Option<String>,
+    err: &mut Option<String>,
+) {
+    let (note, url) = {
+        let st = shared.status.lock().unwrap();
+        (st.update_note.clone(), st.update_url.clone())
+    };
+    ui.heading("🔄 Mise à jour");
+    ui.add_space(4.0);
+    match note {
+        Some(n) => {
+            ui.label(n);
+        }
+        None => {
+            ui.label(egui::RichText::new("Aucune vérification effectuée.").weak());
+        }
+    }
+    ui.horizontal(|ui| {
+        if ui.button("Rechercher une mise à jour").clicked() {
+            let sh = shared.clone();
+            std::thread::spawn(move || crate::update::check_once(&sh));
+        }
+        if let Some(u) = url {
+            if ui.button("📥 Ouvrir la release…").clicked() {
+                open_url(&u);
+                *info = Some(format!("Ouverture de {u}"));
+                *err = None;
+            }
+        }
+    });
+}
+
 fn store_dir(shared: &Arc<Shared>) -> std::path::PathBuf {
     shared.store.lock().unwrap().dir.clone()
 }
@@ -518,6 +781,39 @@ fn new_token() -> String {
     rand::thread_rng().fill_bytes(&mut b);
     use base64::Engine;
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
+}
+
+/// Vérifie un mot de passe admin contre l'empreinte PHC enregistrée (Argon2id).
+fn verify_admin_phc(phc: &str, password: &str) -> bool {
+    use argon2::{Argon2, PasswordHash, PasswordVerifier};
+    match PasswordHash::new(phc) {
+        Ok(parsed) => Argon2::default()
+            .verify_password(password.as_bytes(), &parsed)
+            .is_ok(),
+        Err(_) => false,
+    }
+}
+
+/// Hache un mot de passe admin en PHC (Argon2id, même puissance que le journal).
+fn hash_admin_phc(password: &str) -> Option<String> {
+    use argon2::password_hash::rand_core::OsRng;
+    use argon2::password_hash::SaltString;
+    use argon2::{Algorithm, Argon2, Params, PasswordHasher, Version};
+    let salt = SaltString::generate(&mut OsRng);
+    let params = Params::new(19456, 2, 1, None).ok()?;
+    Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+        .hash_password(password.as_bytes(), &salt)
+        .ok()
+        .map(|h| h.to_string())
+}
+
+/// Ouvre une URL dans le navigateur par défaut.
+fn open_url(url: &str) {
+    use std::os::windows::process::CommandExt;
+    let _ = std::process::Command::new("cmd")
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .args(["/C", "start", "", url])
+        .spawn();
 }
 
 impl eframe::App for DfwApp {

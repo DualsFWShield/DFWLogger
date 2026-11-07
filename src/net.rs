@@ -175,12 +175,20 @@ fn api_events(shared: &Arc<Shared>, after: u64) -> (bool, String) {
         .into_iter()
         .map(|(app, secs)| json!({ "app": app, "secs": secs }))
         .collect();
+    let heatmap: Vec<serde_json::Value> = {
+        let map = shared.heatmap.lock().unwrap();
+        crate::shared::heatmap_rows(&map, 7)
+    }
+    .into_iter()
+    .map(|(day, hour, secs)| json!({ "day": day, "hour": hour, "secs": secs }))
+    .collect();
     let body = json!({
         "locked": false,
         "events": events,
         "next_after": next_after,
         "counts": counts,
         "times": times,
+        "heatmap": heatmap,
         "computer": crate::win::computer_name(),
     });
     (true, body.to_string())

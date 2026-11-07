@@ -33,6 +33,15 @@ jobs:
       - name: Tests
         run: cargo test
 
+      # Audit des dépendances (licences + vulnérabilités RustSec).
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: cargo deny (Licences + Vulnérabilités)
+        run: cargo deny check licenses advisories sources
+
       - name: Version + tag
         id: ver
         shell: pwsh
@@ -59,14 +68,15 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-      - name: Package (exe + README)
+      - name: Package (exe + README + installateur)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target\release\dfwlogger.exe dist\dfwlogger.exe
           Copy-Item README.md dist\README.md
+          Copy-Item installer.cmd dist\installer.cmd
           $tag = "${{ steps.ver.outputs.tag }}"
-          Compress-Archive -Path dist\dfwlogger.exe, dist\README.md -DestinationPath "dfwlogger-$tag-win64.zip"
+          Compress-Archive -Path dist\dfwlogger.exe, dist\README.md, dist\installer.cmd -DestinationPath "dfwlogger-$tag-win64.zip"
           (Get-Item "dfwlogger-$tag-win64.zip").Length
 
       - name: Upload artifact (tous les builds)
@@ -92,6 +102,7 @@ jobs:
             "DFWLogger $($tag.Replace('-b', ' build '))",
             "",
             "- Windows 10/11 x64 — exe non signé (Windows SmartScreen peut demander *exécuter quand même*)",
+            "- Installation : extraire le zip puis lancer `installer.cmd` (copie + raccourcis, sans élévation)",
             "- Consignes : voir README dans le zip — `cargo` non requis pour utiliser l'exe",
             "- Commit : $sha",
             "- L'app est transparente : visible dans la barre des tâches, pas de keylogger ni de collecte distante"

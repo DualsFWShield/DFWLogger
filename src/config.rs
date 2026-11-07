@@ -15,6 +15,14 @@ pub struct Config {
     /// Nombre de fichiers pivotés conservés.
     pub keep_files: u32,
     pub autostart: bool,
+    /// Notifications toast Windows à chaque verrouillage de session.
+    pub notify_lock: bool,
+    /// Notifications toast Windows à chaque échec de connexion (4625).
+    pub notify_failed_logon: bool,
+    /// Dépôt GitHub `compte/repo` pour la vérification de mise à jour.
+    pub github_repo: Option<String>,
+    /// Emprunte Argon2 (PHC) du mot de passe « admin » protégeant les réglages.
+    pub admin_phc: Option<String>,
 }
 
 impl Default for Config {
@@ -28,6 +36,10 @@ impl Default for Config {
             rotate_bytes: 8 * 1024 * 1024,
             keep_files: 6,
             autostart: false,
+            notify_lock: true,
+            notify_failed_logon: true,
+            github_repo: None,
+            admin_phc: None,
         }
     }
 }

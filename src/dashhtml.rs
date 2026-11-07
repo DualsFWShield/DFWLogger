@@ -58,6 +58,11 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
       <tbody id="rows"></tbody>
     </table>
   </div>
+  <div class="card" style="margin-bottom:14px">
+    <h3 style="font-size:15px;margin-bottom:10px">🗓 Usage par jour et par heure (7 derniers jours)</h3>
+    <table id="heat"><tbody></tbody></table>
+    <p style="color:var(--muted);font-size:11px;margin-top:6px">Vert foncé → clair : usage croissant (1800 s = teinte max).</p>
+  </div>
   <div class="card">
     <h3 style="font-size:15px;margin-bottom:10px">⏱ Temps par application (cumulés depuis le déverrouillage)</h3>
     <table>
@@ -105,6 +110,7 @@ async function refresh() {
     timesEl.innerHTML = (data.times || []).map(t =>
       `<tr><td style="width:60%"><b>${esc(t.app)}</b></td><td class="time">${fmtDur(t.secs)}</td></tr>`
     ).join("") || `<tr><td class="time">Aucun temps mesuré pour l'instant.</td></tr>`;
+    renderHeat(data.heatmap || []);
     const rows = document.getElementById("rows");
     for (const e of data.events.slice().reverse()) {
       const tr = document.createElement("tr");
@@ -131,6 +137,27 @@ function fmtDur(s) {
   return s + " s";
 }
 function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+function renderHeat(cells) {
+  const byDay = new Map();
+  for (const c of cells) {
+    if (!byDay.has(c.day)) byDay.set(c.day, {});
+    byDay.get(c.day)[c.hour] = c.secs;
+  }
+  const heat = document.getElementById("heat").tBodies[0];
+  heat.innerHTML = [...byDay.entries()].reverse().map(([day, hours]) =>
+    "<tr><td class=\"k\">" + esc(day) + "</td>" +
+    Array.from({length: 24}, (_, h) => {
+      const s = hours[h] || 0;
+      const bg = s === 0 ? 'rgb(43,46,62)'
+        : "rgb(" + Math.round(45 + (70 - 45) * Math.min(s / 1800, 1)) + ","
+                 + Math.round(55 + (190 - 55) * Math.min(s / 1800, 1)) + ","
+                 + Math.round(70 + (120 - 70) * Math.min(s / 1800, 1)) + ")";
+      const tip = s > 0 ? " — " + fmtDur(s) : "";
+      return "<td title=\"" + day + " " + h + ":00" + tip + "\" style=\"padding:0\">" +
+             "<div style=\"height:13px;background:" + bg + "\"></div></td>";
+    }).join("") + "</tr>").join("");
+}
 boot();
 </script>
 </body>

@@ -77,7 +77,7 @@ fn foreground_monitor(shared: Arc<Shared>) {
             if let (Some((exe, _)), Some(t0)) = (current.as_mut(), started) {
                 let elapsed = t0.elapsed().as_secs();
                 if elapsed > 0 {
-                    shared.record_app_seconds(exe, elapsed);
+                    shared.record_app_time(exe, elapsed);
                     shared.push(EventKind::AppFocus {
                         exe: exe.clone(),
                         title: String::new(),
@@ -107,7 +107,7 @@ fn foreground_monitor(shared: Arc<Shared>) {
                     .unwrap_or(0);
                 if let Some((prev_exe, _)) = &current {
                     if prev_elapsed > 0 {
-                        shared.record_app_seconds(prev_exe, prev_elapsed);
+                        shared.record_app_time(prev_exe, prev_elapsed);
                     }
                     let prev_exe = prev_exe.clone();
                     shared.push(EventKind::AppFocus {
